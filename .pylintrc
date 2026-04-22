@@ -1,0 +1,28 @@
+[MASTER]
+py-version=3.12
+jobs=0
+
+[MAIN]
+# Keep output stable and easy to read in reports
+output-format=text
+
+[MESSAGES CONTROL]
+# Project-specific pragmatism:
+# - FastAPI dependency injection often creates parameters that are not referenced directly.
+# - The OPC UA server is a simulation loop (OT side) where splitting into many functions
+#   is possible but not always useful for a POC.
+disable=
+    missing-module-docstring,
+    missing-function-docstring,
+    unused-argument,
+    too-many-locals,
+    too-many-statements,
+
+[DESIGN]
+# Keep defaults for most design rules; we already disable a few above.
+
+[FORMAT]
+max-line-length=88
+
+[REPORTS]
+score=yes

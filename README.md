@@ -7,24 +7,44 @@ Bienvenue dans la version 2 du projet. Cette version a été reconstruite de zé
 - **Conformité stricte à la norme NF EN 9100** (Qualité Aéronautique & Défense).
 - **Sécurisation SSL/TLS** des communications serveur.
 
-## Démarrage rapide
+## Prérequis & installation
 
-1. **Générer les certificats SSL** (requis pour HTTPS et OPC UA sécurisé) :
-   ```bash
-   python generate_certs.py
-   ```
+### Prérequis
 
-2. **Démarrer le serveur OPC UA** (Simulateur des cellules) :
-   ```bash
-   python src_v2/opcua_server.py
-   ```
+- Python 3.12+
+- Windows PowerShell (pour les scripts `run_servers.ps1` / `run_quality.ps1`)
 
-3. **Démarrer l'interface de supervision Web (FastAPI)** :
-   Ouvrez un autre terminal et exécutez :
-   ```bash
-   python src_v2/web_server.py
-   ```
-   Accédez au dashboard sur **https://127.0.0.1:8443** (Acceptez le certificat auto-signé).
+### Installation (portable)
+
+À exécuter à la racine du projet :
+
+```powershell
+python -m venv .venv
+.\.venv\Scripts\Activate.ps1
+python -m pip install -r requirements.txt
+```
+
+## Sécurité & certificats (SSL/TLS)
+
+Le projet utilise des certificats auto-signés pour :
+
+- **OPC UA (OT)** : échanges chiffrés avec politique *Sign & Encrypt*.
+- **Web (IT)** : accès au dashboard via **HTTPS**.
+
+Génération des certificats (stockés dans `certs/`) :
+
+```powershell
+python generate_certs.py
+```
+
+## Architecture du projet
+
+- `src_v2/` : code source (Serveur Web FastAPI, client OPC UA, sécurité JWT/RBAC).
+- `certs/` : certificats X.509 et clés privées générés localement.
+- `tests/` : tests unitaires (Pytest) pour valider la logique métier et la sécurité.
+- `docs_v2/` : documentation technique, conformité et journaux de traçabilité.
+
+## Lancement
 
 ### Scripts PowerShell (démo & qualité)
 
@@ -36,18 +56,33 @@ Bienvenue dans la version 2 du projet. Cette version a été reconstruite de zé
 ./run_quality.ps1
 ```
 
-## Architecture V2
+Ensuite, ouvre le dashboard :
 
-- `src_v2/opcua_server.py` : Serveur OPC UA (Python asyncua) simulant plusieurs robots de production.
-- `src_v2/web_server.py` : Serveur FastAPI sécurisé par SSL, exposant l'API et le frontend de supervision.
-- `certs/` : Dossier contenant les clés privées et certificats (générés localement).
-- `docs_v2/` : Documentation d'architecture et de conformité.
+- https://127.0.0.1:8082
+
+Accepte le certificat auto-signé si ton navigateur l'affiche comme non reconnu.
+
+### Lancement manuel (si besoin)
+
+Dans deux terminaux séparés :
+
+```powershell
+# Serveur OPC UA (simulateur)
+python -m src_v2.opcua_server
+```
+
+```powershell
+# Serveur Web FastAPI (HTTPS)
+python -m uvicorn src_v2.web_server:app --host 0.0.0.0 --port 8082 `
+  --ssl-keyfile certs/web_key.pem `
+  --ssl-certfile certs/web_cert.pem
+```
 
 ## Qualité (PEP8, tests, sécurité)
 
 Commandes utiles (à lancer à la racine du projet) :
 
-```bash
+```powershell
 # Tests unitaires
 python -m pytest
 
@@ -60,4 +95,7 @@ python -m ruff check .
 # Formatage
 python -m black --check .
 python -m black .
+
+# Analyse statique PyLint (config projet)
+python -m pylint src_v2 --rcfile .\.pylintrc --score=y
 ```
