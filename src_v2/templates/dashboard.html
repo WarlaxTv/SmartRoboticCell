@@ -1,0 +1,413 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
+    <meta http-equiv="Pragma" content="no-cache" />
+    <meta http-equiv="Expires" content="0" />
+    <title>Supervision Usine - NF EN 9100</title>
+    <style>
+        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background: #f4f6f9; color: #333; margin: 0; padding: 20px; }
+        .header { display: flex; justify-content: space-between; align-items: center; border-bottom: 2px solid #ccc; padding-bottom: 10px; margin-bottom: 20px; }
+        .header h1 { margin: 0; color: #2c3e50; font-size: 1.5em; }
+        .badge { background: #e74c3c; color: white; padding: 5px 10px; border-radius: 4px; font-weight: bold; font-size: 0.8em; }
+        .role-badge { background: #34495e; color: white; padding: 5px 10px; border-radius: 4px; font-weight: bold; font-size: 0.8em; margin-left: 10px; }
+        
+        .dashboard { display: grid; grid-template-columns: repeat(auto-fit, minmax(350px, 1fr)); gap: 20px; }
+        .card { background: white; border-radius: 8px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); padding: 20px; border-top: 5px solid #3498db; }
+        .card.fault { border-top-color: #e74c3c; background-color: #fff0f0; }
+        .card.maint { border-top-color: #f39c12; background-color: #fdfbf5; }
+        
+        .card h2 { margin-top: 0; color: #2980b9; display: flex; justify-content: space-between; align-items: center; border-bottom: 2px solid #ecf0f1; padding-bottom: 10px; margin-bottom: 15px;}
+        .stat { margin: 10px 0; font-size: 0.95em; display: flex; justify-content: space-between; align-items: center;}
+        .stat-label { font-weight: bold; color: #7f8c8d; }
+        
+        .status-badge { display: inline-block; padding: 4px 8px; border-radius: 4px; font-weight: bold; font-size: 0.85em; }
+        .status-ok { background: #2ecc71; color: white; }
+        .status-error { background: #e74c3c; color: white; }
+        .status-warn { background: #f39c12; color: white; }
+
+        .progress-container { width: 100%; margin-top: 15px; }
+        .progress-label { display: flex; justify-content: space-between; font-size: 0.85em; font-weight: bold; color: #7f8c8d; margin-bottom: 5px; }
+        .progress-bar { width: 100%; background-color: #ecf0f1; border-radius: 8px; height: 12px; overflow: hidden; box-shadow: inset 0 1px 3px rgba(0,0,0,0.1); }
+        .progress-fill { height: 100%; background-color: #3498db; transition: width 0.5s ease-in-out; }
+        
+        .alarms-box { margin-top: 15px; padding: 10px; background-color: #ffeaa7; border-left: 4px solid #d35400; border-radius: 4px; font-size: 0.85em; color: #d35400; font-weight: bold; display: flex; align-items: center; gap: 10px; }
+        .alarms-box.critical { background-color: #fab1a0; border-color: #e74c3c; color: #c0392b; }
+        
+        .btn { padding: 8px 16px; background: #3498db; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 0.85em; font-weight: bold; transition: background 0.3s; }
+        .btn:hover { background: #2980b9; }
+        .btn-maint { background: #f39c12; margin-top: 10px; width: 100%; }
+        .btn-maint:hover { background: #d68910; }
+
+        .login-container { max-width: 400px; margin: 100px auto; background: white; padding: 30px; border-radius: 8px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); }
+        .login-container input { width: 100%; padding: 10px; margin: 10px 0; box-sizing: border-box; border: 1px solid #ccc; border-radius: 4px; }
+        
+        .history-panel { margin-top: 30px; background: white; padding: 20px; border-radius: 8px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); }
+        .history-item { padding: 10px; border-bottom: 1px solid #eee; font-size: 0.9em; }
+
+        .hidden { display: none !important; }
+    </style>
+</head>
+<body>
+
+    <!-- ÉCRAN DE CONNEXION -->
+    <div id="login-screen" class="login-container">
+        <h2 style="color: #2c3e50; text-align: center;">Authentification SCADA</h2>
+        <p style="font-size: 0.85em; color: #7f8c8d; text-align: center;">Veuillez vous identifier pour accéder au système.</p>
+        <div style="background: #f8f9fa; padding: 10px; font-size: 0.8em; margin-bottom: 15px; border-radius: 4px;">
+            <strong>Comptes de test :</strong><br>
+            Opérateur : <em>jean_ope</em> / <em>ope123</em><br>
+            Maintenance : <em>luc_maint</em> / <em>maint123</em>
+        </div>
+        <input type="text" id="username" placeholder="Nom d'utilisateur">
+        <input type="password" id="password" placeholder="Mot de passe">
+        <button class="btn" style="width: 100%; padding: 12px; margin-top: 10px;" onclick="login()">Se Connecter</button>
+        <div id="login-error" style="color: red; margin-top: 10px; text-align: center; font-size: 0.9em;"></div>
+    </div>
+
+    <!-- ÉCRAN DE SUPERVISION -->
+    <div id="app-screen" class="hidden">
+        <div class="header">
+            <h1>Supervision Multi-Cellules V2</h1>
+            <div>
+                <span class="badge">Lecture Seule</span>
+                <span class="badge" style="background:#2ecc71;">SSL</span>
+                <span class="role-badge" id="user-role-display">Rôle: ---</span>
+                <button class="btn" style="background: #7f8c8d; margin-left: 10px;" onclick="logout()">Déconnexion</button>
+            </div>
+        </div>
+
+        <!-- BANNIERE D'ALERTE (MAINTENANCE) -->
+        <div id="maint-alerts-banner" class="hidden" style="background:#e74c3c; color:white; padding:15px; margin-bottom:20px; border-radius:4px; font-weight:bold; text-align:center; box-shadow: 0 2px 4px rgba(0,0,0,0.2);">
+            <!-- Alertes injectées ici -->
+        </div>
+
+        <div class="dashboard" id="cells-container">
+            <p>Connexion au serveur OPC UA en cours...</p>
+        </div>
+
+        <!-- PANNEAU MAINTENANCE (Visible uniquement par MAINTENANCE) -->
+        <div id="maintenance-panel" class="history-panel hidden">
+            <h2 style="color: #f39c12; margin-top: 0;">🛠️ Registre des interventions Maintenance</h2>
+            <div id="history-content">
+                <p style="color: #7f8c8d;">Chargement de l'historique...</p>
+            </div>
+        </div>
+
+        <!-- PANNEAU DE SIMULATION / TEST (Visible pour tous pour le POC) -->
+        <div id="simu-panel-container" class="history-panel" style="border-top: 5px solid #9b59b6; margin-top: 20px;">
+            <h2 style="color: #8e44ad; margin-top: 0;">🧪 Panneau de Simulation (POC V2)</h2>
+            <p style="font-size:0.85em; color:#7f8c8d;">Utilisez ces boutons pour simuler des événements ou acquitter des erreurs directement sur le serveur OPC UA.</p>
+            <div id="dynamic-simu-buttons" style="display:flex; gap:10px; flex-wrap:wrap; margin-top:15px;">
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let token = localStorage.getItem('jwt_token');
+        let currentRole = localStorage.getItem('user_role');
+
+        if (token) {
+            showApp();
+        }
+
+        async function login() {
+            const user = document.getElementById('username').value;
+            const pass = document.getElementById('password').value;
+            const formData = new URLSearchParams();
+            formData.append('username', user);
+            formData.append('password', pass);
+
+            try {
+                const response = await fetch('/token', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                    body: formData
+                });
+                
+                if (response.ok) {
+                    const data = await response.json();
+                    token = data.access_token;
+                    currentRole = data.role;
+                    localStorage.setItem('jwt_token', token);
+                    localStorage.setItem('user_role', currentRole);
+                    showApp();
+                } else {
+                    document.getElementById('login-error').innerText = "Identifiants incorrects.";
+                }
+            } catch (e) {
+                document.getElementById('login-error').innerText = "Erreur de connexion au serveur.";
+            }
+        }
+
+        function logout() {
+            token = null;
+            currentRole = null;
+            localStorage.removeItem('jwt_token');
+            localStorage.removeItem('user_role');
+            document.getElementById('login-screen').classList.remove('hidden');
+            document.getElementById('app-screen').classList.add('hidden');
+        }
+
+        function showApp() {
+            document.getElementById('login-screen').classList.add('hidden');
+            document.getElementById('app-screen').classList.remove('hidden');
+            document.getElementById('user-role-display').innerText = `Connecté : ${currentRole}`;
+            
+            if (currentRole === "MAINTENANCE") {
+                document.getElementById('maintenance-panel').classList.remove('hidden');
+                fetchHistory();
+            } else {
+                document.getElementById('maintenance-panel').classList.add('hidden');
+            }
+            
+            // On s'assure que le panneau de simu est bien affiché pour tout le monde
+            document.getElementById('simu-panel-container').classList.remove('hidden');
+            
+            fetchStatus();
+        }
+
+        async function fetchStatus() {
+            if (!token) return;
+            try {
+                const response = await fetch('/api/status', {
+                    headers: { 'Authorization': `Bearer ${token}` }
+                });
+                
+                if (response.status === 401) { logout(); return; }
+                
+                const data = await response.json();
+                if (data.status === 'ok') {
+                    const container = document.getElementById('cells-container');
+                    const simuContainer = document.getElementById('dynamic-simu-buttons');
+                    
+                    // On ne redessine les boutons de simu qu'une fois au début pour ne pas clignoter
+                    let drawSimu = (simuContainer.children.length === 0);
+                    
+                    container.innerHTML = ''; 
+                    
+                    let maintAlerts = [];
+
+                    data.cells.forEach(cell => {
+                        const isMaintReq = cell.maint_req || cell.time_to_maint <= 10;
+                        const cardClass = cell.fault ? 'fault' : (isMaintReq ? 'maint' : '');
+                        const statusClass = cell.fault ? 'status-error' : 'status-ok';
+                        
+                        // Gestion de l'alerte pour la maintenance
+                        // L'alerte ne remonte côté maintenance que si l'opérateur a explicitement demandé l'intervention
+                        if (data.maint_requests[cell.id]) {
+                            let reason = cell.fault ? "Défaut critique" : "Maintenance préventive";
+                            reason += " (Appel Opérateur)";
+                            maintAlerts.push(`⚠️ ALERTE : Intervention requise sur la ${cell.name} - ${reason}`);
+                        }
+
+                        if (isMaintReq) {
+                            const ttm = Number(cell.time_to_maint);
+                            let msg = `⏳ ALERTE : Maintenance à prévoir sur la ${cell.name}`;
+                            if (!Number.isNaN(ttm)) {
+                                if (ttm <= 0) {
+                                    msg += " - Échéance atteinte";
+                                } else {
+                                    msg += ` - ${ttm}h restantes`;
+                                }
+                            }
+                            if (data.maint_requests[cell.id]) {
+                                msg += " (Appel Opérateur)";
+                            }
+                            maintAlerts.push(msg);
+                        }
+                        
+                        let alarmsHtml = cell.alarms ? `<div class="alarms-box critical"><span>🚨</span> ${cell.alarms}</div>` : '';
+                        
+                        // Bouton d'appel maintenance (visible que pour l'opérateur) - n'est plus obligatoire !
+                        let btnHtml = '';
+                        const needsIntervention = isMaintReq || cell.fault;
+                        if (currentRole === "OPERATEUR" && needsIntervention && !data.maint_requests[cell.id]) {
+                            btnHtml = `<button class="btn btn-maint" onclick="callMaintenance(${cell.id})" style="margin-top: 15px;">🔔 Demander Intervention Maintenance</button>`;
+                        } else if (currentRole === "OPERATEUR" && data.maint_requests[cell.id]) {
+                            btnHtml = `<p style="color:#2ecc71; font-weight:bold; font-size:0.85em; margin-top: 15px;">✅ Intervention demandée à la maintenance.</p>`;
+                        }
+
+                        const card = document.createElement('div');
+                        card.className = `card ${cardClass}`;
+                        
+                        // Sécurité pour la variable speed au cas où elle ne serait pas envoyée correctement
+                        let speedHtml = '';
+                        if (cell.speed !== undefined && cell.speed !== null) {
+                            speedHtml = `<div class="stat"><span class="stat-label">Vitesse :</span> ${Number(cell.speed).toFixed(1)} %</div>`;
+                        }
+
+                        // Style terminal inspiré
+                        const robotIcon = cell.fault ? '🔴' : '🟢';
+                        const pneumIcon = cell.pneumatic_state ? '🟢' : '🔴';
+                        const lubrixIcon = cell.lubrix_level > 20 ? '🟢' : '🟡';
+                        const sslDate = new Date();
+                        sslDate.setFullYear(sslDate.getFullYear() + 2); // Expiration factice dans 2 ans
+                        const dateStr = sslDate.toLocaleDateString('fr-FR', {day: '2-digit', month: '2-digit', year: '2-digit'});
+
+                        // Boutons d'action pour la Maintenance directement sur la carte
+                        let maintActionHtml = '';
+                        let diagHtml = '';
+                        if (currentRole === "MAINTENANCE") {
+                            diagHtml = `
+                                <div style="border-top: 1px dotted #7f8c8d; margin-top: 10px; padding-top: 10px; color: #e67e22; font-size: 0.85em; font-family: monospace;">
+                                    <strong>[DIAGNOSTICS AVANCÉS - VUE MAINTENANCE]</strong><br>
+                                    <span style="display:inline-block; width:150px;">Température Axes</span>: ${Number(cell.temp_axes).toFixed(1)} °C<br>
+                                    <span style="display:inline-block; width:150px;">Niveau Vibrations</span>: ${Number(cell.vibration).toFixed(2)} mm/s
+                                </div>
+                            `;
+
+                            maintActionHtml = `<div style="margin-top: 15px; display:flex; gap: 10px;">`;
+                            if (isMaintReq) {
+                                maintActionHtml += `<button class="btn" style="background:#3498db; padding: 5px 10px; font-size: 0.8em;" onclick="simuAction(${cell.id}, 'ack_maint')">🔧 Effectuer Maintenance</button>`;
+                            }
+                            if (cell.fault) {
+                                maintActionHtml += `<button class="btn" style="background:#2ecc71; padding: 5px 10px; font-size: 0.8em;" onclick="simuAction(${cell.id}, 'ack_fault')">✔️ Acquitter Défaut</button>`;
+                            }
+                            maintActionHtml += `</div>`;
+                        }
+
+                        card.innerHTML = `
+                            <div style="font-family: monospace; border-bottom: 1px dashed #bdc3c7; padding-bottom: 10px; margin-bottom: 10px; display: flex; justify-content: space-between;">
+                                <strong>CELLULE #${cell.id} : ${cell.name} (IP: ${cell.ip})</strong>
+                            </div>
+                            
+                            <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 10px; font-family: monospace; font-size: 0.9em; margin-bottom: 15px;">
+                                <div>
+                                    <div>[${robotIcon}] ${cell.type}</div>
+                                    <div style="padding-left: 25px; color: #7f8c8d;">
+                                        Statut : <span class="${statusClass}" style="font-weight:bold; font-family:inherit;">${cell.state}</span>
+                                        <br>${cell.fault && cell.alarms ? `<span style="color:#e74c3c;">ERREUR : ${cell.alarms}</span>` : ''}
+                                    </div>
+                                </div>
+                                <div>
+                                    <div>[${pneumIcon}] PNEUMATIQUE (${Number(cell.pneumatic_pressure).toFixed(1)} bar)</div>
+                                    <div style="padding-left: 25px; color: #7f8c8d;">
+                                        Bridage : ${cell.pneumatic_state ? 'ACTIF' : 'INACTIF'}
+                                    </div>
+                                </div>
+                                <div>
+                                    <div>[${lubrixIcon}] LUBRIX ${cell.lubrix_level > 20 ? 'OK' : 'LOW'}</div>
+                                    <div style="padding-left: 25px; color: #7f8c8d;">
+                                        Niveau : ${cell.lubrix_level}%
+                                    </div>
+                                </div>
+                            </div>
+                            
+                            <div style="font-family: monospace; font-size: 0.85em; color: #7f8c8d; margin-bottom: 15px;">
+                                [🔒] SÉCURITÉ SSL : CERTIFICAT VALIDE (Expire : ${dateStr})
+                            </div>
+
+                            <div class="stat"><span class="stat-label">Temps av. Maint. :</span> <span style="font-weight:bold; color:${isMaintReq ? '#e74c3c' : '#2ecc71'}">${cell.time_to_maint} Heures</span></div>
+                            ${speedHtml}
+                            
+                            <div class="progress-container" style="margin-top: 10px;">
+                                <div class="progress-label">
+                                    <span>Progression du cycle</span>
+                                    <span>${cell.progress.toFixed(1)}%</span>
+                                </div>
+                                <div class="progress-bar">
+                                    <div class="progress-fill" style="width: ${cell.progress}%; background-color: ${cell.fault ? '#e74c3c' : '#3498db'}"></div>
+                                </div>
+                            </div>
+
+                            ${diagHtml}
+                            ${btnHtml}
+                            ${maintActionHtml}
+                        `;
+                        container.appendChild(card);
+                        
+                        // Création des boutons de test/simu
+                        if (drawSimu) {
+                            simuContainer.innerHTML += `
+                                <div style="border:1px solid #bdc3c7; padding:10px; border-radius:4px; flex: 1 1 300px;">
+                                    <h4 style="margin:0 0 10px 0; color:#34495e;">${cell.name}</h4>
+                                    <div style="display:flex; gap:5px; flex-wrap:wrap;">
+                                        <button class="btn" style="background:#e74c3c;" onclick="simuAction(${cell.id}, 'force_fault')">💥 Forcer Défaut</button>
+                                        <button class="btn" style="background:#f39c12;" onclick="simuAction(${cell.id}, 'force_maint')">⏳ Maint. à 9H</button>
+                                        <button class="btn" style="background:#2ecc71;" onclick="simuAction(${cell.id}, 'ack_fault')">✔️ Acquitter Défaut</button>
+                                        <button class="btn" style="background:#3498db;" onclick="simuAction(${cell.id}, 'ack_maint')">🔧 Faire Maintenance</button>
+                                    </div>
+                                </div>
+                            `;
+                        }
+                    });
+                    
+                    // Affichage de la bannière d'alerte pour la maintenance
+                    const alertBanner = document.getElementById('maint-alerts-banner');
+                    if (currentRole === "MAINTENANCE" && maintAlerts.length > 0) {
+                        alertBanner.innerHTML = maintAlerts.join('<br>');
+                        alertBanner.classList.remove('hidden');
+                    } else {
+                        alertBanner.classList.add('hidden');
+                    }
+                }
+            } catch (error) {
+                console.error(error);
+            }
+        }
+
+        async function callMaintenance(cellId) {
+            try {
+                const response = await fetch(`/api/maintenance/request?cell_id=${cellId}`, {
+                    method: 'POST',
+                    headers: { 'Authorization': `Bearer ${token}` }
+                });
+                if (response.ok) { alert("Demande envoyée au service maintenance !"); }
+            } catch(e) { console.error(e); }
+        }
+
+        async function simuAction(cellId, action) {
+            if (currentRole !== "MAINTENANCE") {
+                alert("Action réservée au rôle MAINTENANCE.");
+                return;
+            }
+            try {
+                const response = await fetch(`/api/simu/action?cell_id=${cellId}&action=${action}`, {
+                    method: 'POST',
+                    headers: { 'Authorization': `Bearer ${token}` }
+                });
+                if (!response.ok) {
+                    let detail = "Erreur action simulation";
+                    try {
+                        const body = await response.json();
+                        if (body && body.detail) detail = body.detail;
+                    } catch (e) {
+                        // ignore
+                    }
+                    alert(detail);
+                    return;
+                }
+                await fetchStatus();
+            } catch(e) { console.error(e); }
+        }
+
+        async function fetchHistory() {
+            if (!token || currentRole !== "MAINTENANCE") return;
+            try {
+                const response = await fetch('/api/maintenance/history', {
+                    headers: { 'Authorization': `Bearer ${token}` }
+                });
+                const data = await response.json();
+                if (data.status === 'ok') {
+                    const container = document.getElementById('history-content');
+                    if (data.history.length === 0) {
+                        container.innerHTML = "<p>Aucune intervention demandée.</p>";
+                    } else {
+                        container.innerHTML = data.history.reverse().map(h => 
+                            `<div class="history-item"><strong>${h.time}</strong> : ${h.action} <em>(Demandé par ${h.user})</em></div>`
+                        ).join('');
+                    }
+                }
+            } catch(e) { console.error(e); }
+        }
+
+        setInterval(() => {
+            fetchStatus();
+            if(currentRole === "MAINTENANCE") fetchHistory();
+        }, 1000);
+    </script>
+</body>
+</html>

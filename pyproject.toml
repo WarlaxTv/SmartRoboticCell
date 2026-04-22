@@ -1,0 +1,25 @@
+[tool.black]
+line-length = 88
+target-version = ["py312"]
+
+[tool.ruff]
+line-length = 88
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B", "S"]
+ignore = [
+  "S101", # assert usage (tests)
+  "S104", # allow binding to all interfaces in dev
+  "B008", # FastAPI Depends pattern
+  "S311", # random used for simulation, not crypto
+]
+
+[tool.pytest.ini_options]
+addopts = "-q"
+testpaths = ["tests"]
+
+[tool.coverage.run]
+omit = [
+  "src_v2/opcua_server.py",
+]

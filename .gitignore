@@ -1,0 +1,30 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyd
+*.so
+*.egg-info/
+.dist/
+build/
+
+# Virtual environments
+.venv/
+venv/
+ENV/
+
+# Tooling caches / local artifacts
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+coverage.xml
+htmlcov/
+
+# Certificates (generated locally via generate_certs.py)
+certs/
+
+# OS / IDE
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
