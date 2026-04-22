@@ -54,28 +54,32 @@
 
     <!-- ÉCRAN DE CONNEXION -->
     <div id="login-screen" class="login-container">
-        <h2 style="color: #2c3e50; text-align: center;">Authentification SCADA</h2>
-        <p style="font-size: 0.85em; color: #7f8c8d; text-align: center;">Veuillez vous identifier pour accéder au système.</p>
+        <div style="display:flex; justify-content: flex-end;">
+            <button id="lang-toggle-login" class="btn" style="background:#34495e;" onclick="toggleLanguage()">FR</button>
+        </div>
+        <h2 id="login-title" style="color: #2c3e50; text-align: center;">Authentification SCADA</h2>
+        <p id="login-subtitle" style="font-size: 0.85em; color: #7f8c8d; text-align: center;">Veuillez vous identifier pour accéder au système.</p>
         <div style="background: #f8f9fa; padding: 10px; font-size: 0.8em; margin-bottom: 15px; border-radius: 4px;">
-            <strong>Comptes de test :</strong><br>
-            Opérateur : <em>jean_ope</em> / <em>ope123</em><br>
-            Maintenance : <em>luc_maint</em> / <em>maint123</em>
+            <strong id="test-accounts-title">Comptes de test :</strong><br>
+            <span id="test-accounts-operator">Opérateur :</span> <em>jean_ope</em> / <em>ope123</em><br>
+            <span id="test-accounts-maint">Maintenance :</span> <em>luc_maint</em> / <em>maint123</em>
         </div>
         <input type="text" id="username" placeholder="Nom d'utilisateur">
         <input type="password" id="password" placeholder="Mot de passe">
-        <button class="btn" style="width: 100%; padding: 12px; margin-top: 10px;" onclick="login()">Se Connecter</button>
+        <button id="login-button" class="btn" style="width: 100%; padding: 12px; margin-top: 10px;" onclick="login()">Se Connecter</button>
         <div id="login-error" style="color: red; margin-top: 10px; text-align: center; font-size: 0.9em;"></div>
     </div>
 
     <!-- ÉCRAN DE SUPERVISION -->
     <div id="app-screen" class="hidden">
         <div class="header">
-            <h1>Supervision Multi-Cellules V2</h1>
+            <h1 id="app-title">Supervision Multi-Cellules V2</h1>
             <div>
-                <span class="badge">Lecture Seule</span>
+                <span id="badge-read-only" class="badge">Lecture Seule</span>
                 <span class="badge" style="background:#2ecc71;">SSL</span>
-                <span class="role-badge" id="user-role-display">Rôle: ---</span>
-                <button class="btn" style="background: #7f8c8d; margin-left: 10px;" onclick="logout()">Déconnexion</button>
+                <span class="role-badge" id="user-role-display">Role: ---</span>
+                <button id="lang-toggle-app" class="btn" style="background:#34495e; margin-left: 10px;" onclick="toggleLanguage()">FR</button>
+                <button id="logout-button" class="btn" style="background: #7f8c8d; margin-left: 10px;" onclick="logout()">Déconnexion</button>
             </div>
         </div>
 
@@ -85,21 +89,21 @@
         </div>
 
         <div class="dashboard" id="cells-container">
-            <p>Connexion au serveur OPC UA en cours...</p>
+            <p id="opcua-connecting">Connexion au serveur OPC UA en cours...</p>
         </div>
 
         <!-- PANNEAU MAINTENANCE (Visible uniquement par MAINTENANCE) -->
         <div id="maintenance-panel" class="history-panel hidden">
-            <h2 style="color: #f39c12; margin-top: 0;">🛠️ Registre des interventions Maintenance</h2>
+            <h2 id="maintenance-title" style="color: #f39c12; margin-top: 0;">🛠️ Registre des interventions Maintenance</h2>
             <div id="history-content">
-                <p style="color: #7f8c8d;">Chargement de l'historique...</p>
+                <p id="history-loading" style="color: #7f8c8d;">Chargement de l'historique...</p>
             </div>
         </div>
 
         <!-- PANNEAU DE SIMULATION / TEST (Visible pour tous pour le POC) -->
         <div id="simu-panel-container" class="history-panel" style="border-top: 5px solid #9b59b6; margin-top: 20px;">
-            <h2 style="color: #8e44ad; margin-top: 0;">🧪 Panneau de Simulation (POC V2)</h2>
-            <p style="font-size:0.85em; color:#7f8c8d;">Utilisez ces boutons pour simuler des événements ou acquitter des erreurs directement sur le serveur OPC UA.</p>
+            <h2 id="simu-title" style="color: #8e44ad; margin-top: 0;">🧪 Panneau de Simulation (POC V2)</h2>
+            <p id="simu-subtitle" style="font-size:0.85em; color:#7f8c8d;">Utilisez ces boutons pour simuler des événements ou acquitter des erreurs directement sur le serveur OPC UA.</p>
             <div id="dynamic-simu-buttons" style="display:flex; gap:10px; flex-wrap:wrap; margin-top:15px;">
             </div>
         </div>
@@ -108,6 +112,212 @@
     <script>
         let token = localStorage.getItem('jwt_token');
         let currentRole = localStorage.getItem('user_role');
+        let currentLang = localStorage.getItem('src_lang') || 'fr';
+
+        const I18N = {
+            fr: {
+                title: "Supervision Usine - NF EN 9100",
+                loginTitle: "Authentification SCADA",
+                loginSubtitle: "Veuillez vous identifier pour accéder au système.",
+                testAccountsTitle: "Comptes de test :",
+                testAccountsOperator: "Opérateur :",
+                testAccountsMaint: "Maintenance :",
+                usernamePlaceholder: "Nom d'utilisateur",
+                passwordPlaceholder: "Mot de passe",
+                signIn: "Se Connecter",
+                invalidCredentials: "Identifiants incorrects.",
+                serverConnectionError: "Erreur de connexion au serveur.",
+                appTitle: "Supervision Multi-Cellules V2",
+                readOnly: "Lecture Seule",
+                signOut: "Déconnexion",
+                opcuaConnecting: "Connexion au serveur OPC UA en cours...",
+                maintenanceTitle: "🛠️ Registre des interventions Maintenance",
+                historyLoading: "Chargement de l'historique...",
+                simuTitle: "🧪 Panneau de Simulation (POC V2)",
+                simuSubtitle:
+                    "Utilisez ces boutons pour simuler des événements ou acquitter des erreurs directement sur le serveur OPC UA.",
+                signedIn: "Connecté",
+                requestMaintenance: "🔔 Demander Intervention Maintenance",
+                maintenanceRequested: "✅ Intervention demandée à la maintenance.",
+                speed: "Vitesse :",
+                status: "Statut :",
+                error: "ERREUR :",
+                pneumatics: "PNEUMATIQUE",
+                clamping: "Bridage :",
+                clampOn: "ACTIF",
+                clampOff: "INACTIF",
+                level: "Niveau :",
+                sslValid: "[🔒] SÉCURITÉ SSL : CERTIFICAT VALIDE (Expire : {date})",
+                timeToMaint: "Temps av. Maint. :",
+                hours: "Heures",
+                cycleProgress: "Progression du cycle",
+                advancedDiagnostics: "[DIAGNOSTICS AVANCÉS - VUE MAINTENANCE]",
+                axesTemp: "Température Axes",
+                vibrationLevel: "Niveau Vibrations",
+                maintenanceCompleted: "🔧 Maintenance effectuée",
+                acknowledgeFault: "✔️ Acquitter Défaut",
+                forceFault: "💥 Forcer Défaut",
+                setMaint9h: "⏳ Maint. à 9H",
+                doMaintenance: "🔧 Faire Maintenance",
+                requestSent: "Demande envoyée au service maintenance !",
+                restrictedMaintenance: "Action réservée au rôle MAINTENANCE.",
+                simulationFailed: "Erreur action simulation",
+                noInterventions: "<p>Aucune intervention demandée.</p>",
+                requestedBy: "Demandé par",
+                criticalFault: "Défaut critique",
+                preventiveMaintenance: "Maintenance préventive",
+                operatorCall: "(Appel Opérateur)",
+                alertInterventionRequired:
+                    "⚠️ ALERTE : Intervention requise sur la {name} - {reason}",
+                alertMaintenanceRequired: "⏳ ALERTE : Maintenance à prévoir sur la {name}",
+                dueNow: "- Échéance atteinte",
+                remaining: "- {ttm}h restantes",
+                cellLabel: "CELLULE",
+            },
+            en: {
+                title: "Factory Monitoring - NF EN 9100",
+                loginTitle: "SCADA Login",
+                loginSubtitle: "Please sign in to access the system.",
+                testAccountsTitle: "Test accounts:",
+                testAccountsOperator: "Operator:",
+                testAccountsMaint: "Maintenance:",
+                usernamePlaceholder: "Username",
+                passwordPlaceholder: "Password",
+                signIn: "Sign In",
+                invalidCredentials: "Invalid credentials.",
+                serverConnectionError: "Server connection error.",
+                appTitle: "Multi-Cell Monitoring V2",
+                readOnly: "Read Only",
+                signOut: "Sign Out",
+                opcuaConnecting: "Connecting to OPC UA server...",
+                maintenanceTitle: "🛠️ Maintenance Intervention Log",
+                historyLoading: "Loading history...",
+                simuTitle: "🧪 Simulation Panel (POC V2)",
+                simuSubtitle:
+                    "Use these buttons to simulate events or acknowledge alarms directly on the OPC UA server.",
+                signedIn: "Signed in",
+                requestMaintenance: "🔔 Request Maintenance Intervention",
+                maintenanceRequested: "✅ Maintenance intervention requested.",
+                speed: "Speed:",
+                status: "Status:",
+                error: "ERROR:",
+                pneumatics: "PNEUMATICS",
+                clamping: "Clamping:",
+                clampOn: "ON",
+                clampOff: "OFF",
+                level: "Level:",
+                sslValid: "[🔒] SSL SECURITY: VALID CERTIFICATE (Expires: {date})",
+                timeToMaint: "Time to maintenance:",
+                hours: "Hours",
+                cycleProgress: "Cycle progress",
+                advancedDiagnostics: "[ADVANCED DIAGNOSTICS - MAINTENANCE VIEW]",
+                axesTemp: "Axes temperature",
+                vibrationLevel: "Vibration level",
+                maintenanceCompleted: "🔧 Maintenance Completed",
+                acknowledgeFault: "✔️ Acknowledge Fault",
+                forceFault: "💥 Force Fault",
+                setMaint9h: "⏳ Set Maint. to 9H",
+                doMaintenance: "🔧 Maintenance Completed",
+                requestSent: "Request sent to maintenance team!",
+                restrictedMaintenance:
+                    "This action is restricted to the MAINTENANCE role.",
+                simulationFailed: "Simulation action failed",
+                noInterventions: "<p>No interventions requested.</p>",
+                requestedBy: "Requested by",
+                criticalFault: "Critical fault",
+                preventiveMaintenance: "Preventive maintenance",
+                operatorCall: "(Operator call)",
+                alertInterventionRequired:
+                    "⚠️ ALERT: Intervention required on {name} - {reason}",
+                alertMaintenanceRequired:
+                    "⏳ ALERT: Maintenance required on {name}",
+                dueNow: "- Due now",
+                remaining: "- {ttm}h remaining",
+                cellLabel: "CELL",
+            },
+        };
+
+        function t(key, params = {}) {
+            const dict = I18N[currentLang] || I18N.fr;
+            let s = dict[key] ?? I18N.fr[key] ?? key;
+            for (const [k, v] of Object.entries(params)) {
+                s = s.replaceAll(`{${k}}`, String(v));
+            }
+            return s;
+        }
+
+        function applyLanguage() {
+            document.documentElement.lang = currentLang;
+            document.title = t('title');
+            const loginTitle = document.getElementById('login-title');
+            if (loginTitle) loginTitle.innerText = t('loginTitle');
+            const loginSubtitle = document.getElementById('login-subtitle');
+            if (loginSubtitle) loginSubtitle.innerText = t('loginSubtitle');
+            const testAccountsTitle = document.getElementById('test-accounts-title');
+            if (testAccountsTitle) testAccountsTitle.innerText = t('testAccountsTitle');
+            const testAccountsOperator = document.getElementById(
+                'test-accounts-operator',
+            );
+            if (testAccountsOperator) {
+                testAccountsOperator.innerText = t('testAccountsOperator');
+            }
+            const testAccountsMaint = document.getElementById('test-accounts-maint');
+            if (testAccountsMaint) testAccountsMaint.innerText = t('testAccountsMaint');
+            const username = document.getElementById('username');
+            if (username) username.placeholder = t('usernamePlaceholder');
+            const password = document.getElementById('password');
+            if (password) password.placeholder = t('passwordPlaceholder');
+            const loginButton = document.getElementById('login-button');
+            if (loginButton) loginButton.innerText = t('signIn');
+            const appTitle = document.getElementById('app-title');
+            if (appTitle) appTitle.innerText = t('appTitle');
+            const badgeReadOnly = document.getElementById('badge-read-only');
+            if (badgeReadOnly) badgeReadOnly.innerText = t('readOnly');
+            const logoutButton = document.getElementById('logout-button');
+            if (logoutButton) logoutButton.innerText = t('signOut');
+            const opcuaConnecting = document.getElementById('opcua-connecting');
+            if (opcuaConnecting) opcuaConnecting.innerText = t('opcuaConnecting');
+            const maintenanceTitle = document.getElementById('maintenance-title');
+            if (maintenanceTitle) maintenanceTitle.innerText = t('maintenanceTitle');
+            const historyLoading = document.getElementById('history-loading');
+            if (historyLoading) historyLoading.innerText = t('historyLoading');
+            const simuTitle = document.getElementById('simu-title');
+            if (simuTitle) simuTitle.innerText = t('simuTitle');
+            const simuSubtitle = document.getElementById('simu-subtitle');
+            if (simuSubtitle) simuSubtitle.innerText = t('simuSubtitle');
+
+            const langLabel = currentLang === 'fr' ? 'EN' : 'FR';
+            const langToggleLogin = document.getElementById('lang-toggle-login');
+            if (langToggleLogin) langToggleLogin.innerText = langLabel;
+            const langToggleApp = document.getElementById('lang-toggle-app');
+            if (langToggleApp) langToggleApp.innerText = langLabel;
+
+            updateRoleDisplay();
+        }
+
+        function toggleLanguage() {
+            currentLang = currentLang === 'fr' ? 'en' : 'fr';
+            localStorage.setItem('src_lang', currentLang);
+            applyLanguage();
+            if (token) fetchStatus();
+            if (token && currentRole === "MAINTENANCE") fetchHistory();
+        }
+
+        function updateRoleDisplay() {
+            const el = document.getElementById('user-role-display');
+            if (!el) return;
+            if (!currentRole) {
+                el.innerText = '---';
+                return;
+            }
+            const roleLabel =
+                currentLang === 'en' && currentRole === 'OPERATEUR'
+                    ? 'OPERATOR'
+                    : currentRole;
+            el.innerText = `${t('signedIn')}: ${roleLabel}`;
+        }
+
+        applyLanguage();
 
         if (token) {
             showApp();
@@ -135,10 +345,14 @@
                     localStorage.setItem('user_role', currentRole);
                     showApp();
                 } else {
-                    document.getElementById('login-error').innerText = "Identifiants incorrects.";
+                    document.getElementById('login-error').innerText = t(
+                        'invalidCredentials',
+                    );
                 }
             } catch (e) {
-                document.getElementById('login-error').innerText = "Erreur de connexion au serveur.";
+                document.getElementById('login-error').innerText = t(
+                    'serverConnectionError',
+                );
             }
         }
 
@@ -154,7 +368,7 @@
         function showApp() {
             document.getElementById('login-screen').classList.add('hidden');
             document.getElementById('app-screen').classList.remove('hidden');
-            document.getElementById('user-role-display').innerText = `Connecté : ${currentRole}`;
+            updateRoleDisplay();
             
             if (currentRole === "MAINTENANCE") {
                 document.getElementById('maintenance-panel').classList.remove('hidden');
@@ -198,23 +412,30 @@
                         // Gestion de l'alerte pour la maintenance
                         // L'alerte ne remonte côté maintenance que si l'opérateur a explicitement demandé l'intervention
                         if (data.maint_requests[cell.id]) {
-                            let reason = cell.fault ? "Défaut critique" : "Maintenance préventive";
-                            reason += " (Appel Opérateur)";
-                            maintAlerts.push(`⚠️ ALERTE : Intervention requise sur la ${cell.name} - ${reason}`);
+                            let reason = cell.fault
+                                ? t('criticalFault')
+                                : t('preventiveMaintenance');
+                            reason += ` ${t('operatorCall')}`;
+                            maintAlerts.push(
+                                t('alertInterventionRequired', {
+                                    name: cell.name,
+                                    reason,
+                                }),
+                            );
                         }
 
                         if (isMaintReq) {
                             const ttm = Number(cell.time_to_maint);
-                            let msg = `⏳ ALERTE : Maintenance à prévoir sur la ${cell.name}`;
+                            let msg = t('alertMaintenanceRequired', { name: cell.name });
                             if (!Number.isNaN(ttm)) {
                                 if (ttm <= 0) {
-                                    msg += " - Échéance atteinte";
+                                    msg += ` ${t('dueNow')}`;
                                 } else {
-                                    msg += ` - ${ttm}h restantes`;
+                                    msg += ` ${t('remaining', { ttm })}`;
                                 }
                             }
                             if (data.maint_requests[cell.id]) {
-                                msg += " (Appel Opérateur)";
+                                msg += ` ${t('operatorCall')}`;
                             }
                             maintAlerts.push(msg);
                         }
@@ -225,9 +446,9 @@
                         let btnHtml = '';
                         const needsIntervention = isMaintReq || cell.fault;
                         if (currentRole === "OPERATEUR" && needsIntervention && !data.maint_requests[cell.id]) {
-                            btnHtml = `<button class="btn btn-maint" onclick="callMaintenance(${cell.id})" style="margin-top: 15px;">🔔 Demander Intervention Maintenance</button>`;
+                            btnHtml = `<button class="btn btn-maint" onclick="callMaintenance(${cell.id})" style="margin-top: 15px;">${t('requestMaintenance')}</button>`;
                         } else if (currentRole === "OPERATEUR" && data.maint_requests[cell.id]) {
-                            btnHtml = `<p style="color:#2ecc71; font-weight:bold; font-size:0.85em; margin-top: 15px;">✅ Intervention demandée à la maintenance.</p>`;
+                            btnHtml = `<p style="color:#2ecc71; font-weight:bold; font-size:0.85em; margin-top: 15px;">${t('maintenanceRequested')}</p>`;
                         }
 
                         const card = document.createElement('div');
@@ -236,7 +457,7 @@
                         // Sécurité pour la variable speed au cas où elle ne serait pas envoyée correctement
                         let speedHtml = '';
                         if (cell.speed !== undefined && cell.speed !== null) {
-                            speedHtml = `<div class="stat"><span class="stat-label">Vitesse :</span> ${Number(cell.speed).toFixed(1)} %</div>`;
+                            speedHtml = `<div class="stat"><span class="stat-label">${t('speed')}</span> ${Number(cell.speed).toFixed(1)} %</div>`;
                         }
 
                         // Style terminal inspiré
@@ -245,7 +466,8 @@
                         const lubrixIcon = cell.lubrix_level > 20 ? '🟢' : '🟡';
                         const sslDate = new Date();
                         sslDate.setFullYear(sslDate.getFullYear() + 2); // Expiration factice dans 2 ans
-                        const dateStr = sslDate.toLocaleDateString('fr-FR', {day: '2-digit', month: '2-digit', year: '2-digit'});
+                        const locale = currentLang === 'en' ? 'en-GB' : 'fr-FR';
+                        const dateStr = sslDate.toLocaleDateString(locale, {day: '2-digit', month: '2-digit', year: '2-digit'});
 
                         // Boutons d'action pour la Maintenance directement sur la carte
                         let maintActionHtml = '';
@@ -253,59 +475,59 @@
                         if (currentRole === "MAINTENANCE") {
                             diagHtml = `
                                 <div style="border-top: 1px dotted #7f8c8d; margin-top: 10px; padding-top: 10px; color: #e67e22; font-size: 0.85em; font-family: monospace;">
-                                    <strong>[DIAGNOSTICS AVANCÉS - VUE MAINTENANCE]</strong><br>
-                                    <span style="display:inline-block; width:150px;">Température Axes</span>: ${Number(cell.temp_axes).toFixed(1)} °C<br>
-                                    <span style="display:inline-block; width:150px;">Niveau Vibrations</span>: ${Number(cell.vibration).toFixed(2)} mm/s
+                                    <strong>${t('advancedDiagnostics')}</strong><br>
+                                    <span style="display:inline-block; width:150px;">${t('axesTemp')}</span>: ${Number(cell.temp_axes).toFixed(1)} °C<br>
+                                    <span style="display:inline-block; width:150px;">${t('vibrationLevel')}</span>: ${Number(cell.vibration).toFixed(2)} mm/s
                                 </div>
                             `;
 
                             maintActionHtml = `<div style="margin-top: 15px; display:flex; gap: 10px;">`;
                             if (isMaintReq) {
-                                maintActionHtml += `<button class="btn" style="background:#3498db; padding: 5px 10px; font-size: 0.8em;" onclick="simuAction(${cell.id}, 'ack_maint')">🔧 Effectuer Maintenance</button>`;
+                                maintActionHtml += `<button class="btn" style="background:#3498db; padding: 5px 10px; font-size: 0.8em;" onclick="simuAction(${cell.id}, 'ack_maint')">${t('maintenanceCompleted')}</button>`;
                             }
                             if (cell.fault) {
-                                maintActionHtml += `<button class="btn" style="background:#2ecc71; padding: 5px 10px; font-size: 0.8em;" onclick="simuAction(${cell.id}, 'ack_fault')">✔️ Acquitter Défaut</button>`;
+                                maintActionHtml += `<button class="btn" style="background:#2ecc71; padding: 5px 10px; font-size: 0.8em;" onclick="simuAction(${cell.id}, 'ack_fault')">${t('acknowledgeFault')}</button>`;
                             }
                             maintActionHtml += `</div>`;
                         }
 
                         card.innerHTML = `
                             <div style="font-family: monospace; border-bottom: 1px dashed #bdc3c7; padding-bottom: 10px; margin-bottom: 10px; display: flex; justify-content: space-between;">
-                                <strong>CELLULE #${cell.id} : ${cell.name} (IP: ${cell.ip})</strong>
+                                <strong>${t('cellLabel')} #${cell.id}: ${cell.name} (IP: ${cell.ip})</strong>
                             </div>
                             
                             <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 10px; font-family: monospace; font-size: 0.9em; margin-bottom: 15px;">
                                 <div>
                                     <div>[${robotIcon}] ${cell.type}</div>
                                     <div style="padding-left: 25px; color: #7f8c8d;">
-                                        Statut : <span class="${statusClass}" style="font-weight:bold; font-family:inherit;">${cell.state}</span>
-                                        <br>${cell.fault && cell.alarms ? `<span style="color:#e74c3c;">ERREUR : ${cell.alarms}</span>` : ''}
+                                        ${t('status')} <span class="${statusClass}" style="font-weight:bold; font-family:inherit;">${cell.state}</span>
+                                        <br>${cell.fault && cell.alarms ? `<span style="color:#e74c3c;">${t('error')} ${cell.alarms}</span>` : ''}
                                     </div>
                                 </div>
                                 <div>
-                                    <div>[${pneumIcon}] PNEUMATIQUE (${Number(cell.pneumatic_pressure).toFixed(1)} bar)</div>
+                                    <div>[${pneumIcon}] ${t('pneumatics')} (${Number(cell.pneumatic_pressure).toFixed(1)} bar)</div>
                                     <div style="padding-left: 25px; color: #7f8c8d;">
-                                        Bridage : ${cell.pneumatic_state ? 'ACTIF' : 'INACTIF'}
+                                        ${t('clamping')} ${cell.pneumatic_state ? t('clampOn') : t('clampOff')}
                                     </div>
                                 </div>
                                 <div>
                                     <div>[${lubrixIcon}] LUBRIX ${cell.lubrix_level > 20 ? 'OK' : 'LOW'}</div>
                                     <div style="padding-left: 25px; color: #7f8c8d;">
-                                        Niveau : ${cell.lubrix_level}%
+                                        ${t('level')} ${cell.lubrix_level}%
                                     </div>
                                 </div>
                             </div>
                             
                             <div style="font-family: monospace; font-size: 0.85em; color: #7f8c8d; margin-bottom: 15px;">
-                                [🔒] SÉCURITÉ SSL : CERTIFICAT VALIDE (Expire : ${dateStr})
+                                ${t('sslValid', { date: dateStr })}
                             </div>
 
-                            <div class="stat"><span class="stat-label">Temps av. Maint. :</span> <span style="font-weight:bold; color:${isMaintReq ? '#e74c3c' : '#2ecc71'}">${cell.time_to_maint} Heures</span></div>
+                            <div class="stat"><span class="stat-label">${t('timeToMaint')}</span> <span style="font-weight:bold; color:${isMaintReq ? '#e74c3c' : '#2ecc71'}">${cell.time_to_maint} ${t('hours')}</span></div>
                             ${speedHtml}
                             
                             <div class="progress-container" style="margin-top: 10px;">
                                 <div class="progress-label">
-                                    <span>Progression du cycle</span>
+                                    <span>${t('cycleProgress')}</span>
                                     <span>${cell.progress.toFixed(1)}%</span>
                                 </div>
                                 <div class="progress-bar">
@@ -325,10 +547,10 @@
                                 <div style="border:1px solid #bdc3c7; padding:10px; border-radius:4px; flex: 1 1 300px;">
                                     <h4 style="margin:0 0 10px 0; color:#34495e;">${cell.name}</h4>
                                     <div style="display:flex; gap:5px; flex-wrap:wrap;">
-                                        <button class="btn" style="background:#e74c3c;" onclick="simuAction(${cell.id}, 'force_fault')">💥 Forcer Défaut</button>
-                                        <button class="btn" style="background:#f39c12;" onclick="simuAction(${cell.id}, 'force_maint')">⏳ Maint. à 9H</button>
-                                        <button class="btn" style="background:#2ecc71;" onclick="simuAction(${cell.id}, 'ack_fault')">✔️ Acquitter Défaut</button>
-                                        <button class="btn" style="background:#3498db;" onclick="simuAction(${cell.id}, 'ack_maint')">🔧 Faire Maintenance</button>
+                                        <button class="btn" style="background:#e74c3c;" onclick="simuAction(${cell.id}, 'force_fault')">${t('forceFault')}</button>
+                                        <button class="btn" style="background:#f39c12;" onclick="simuAction(${cell.id}, 'force_maint')">${t('setMaint9h')}</button>
+                                        <button class="btn" style="background:#2ecc71;" onclick="simuAction(${cell.id}, 'ack_fault')">${t('acknowledgeFault')}</button>
+                                        <button class="btn" style="background:#3498db;" onclick="simuAction(${cell.id}, 'ack_maint')">${t('doMaintenance')}</button>
                                     </div>
                                 </div>
                             `;
@@ -355,13 +577,13 @@
                     method: 'POST',
                     headers: { 'Authorization': `Bearer ${token}` }
                 });
-                if (response.ok) { alert("Demande envoyée au service maintenance !"); }
+                if (response.ok) { alert(t('requestSent')); }
             } catch(e) { console.error(e); }
         }
 
         async function simuAction(cellId, action) {
             if (currentRole !== "MAINTENANCE") {
-                alert("Action réservée au rôle MAINTENANCE.");
+                alert(t('restrictedMaintenance'));
                 return;
             }
             try {
@@ -370,7 +592,7 @@
                     headers: { 'Authorization': `Bearer ${token}` }
                 });
                 if (!response.ok) {
-                    let detail = "Erreur action simulation";
+                    let detail = t('simulationFailed');
                     try {
                         const body = await response.json();
                         if (body && body.detail) detail = body.detail;
@@ -394,10 +616,10 @@
                 if (data.status === 'ok') {
                     const container = document.getElementById('history-content');
                     if (data.history.length === 0) {
-                        container.innerHTML = "<p>Aucune intervention demandée.</p>";
+                        container.innerHTML = t('noInterventions');
                     } else {
                         container.innerHTML = data.history.reverse().map(h => 
-                            `<div class="history-item"><strong>${h.time}</strong> : ${h.action} <em>(Demandé par ${h.user})</em></div>`
+                            `<div class="history-item"><strong>${h.time}</strong> : ${h.action} <em>(${t('requestedBy')} ${h.user})</em></div>`
                         ).join('');
                     }
                 }
