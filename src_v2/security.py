@@ -10,6 +10,7 @@ from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
+import bcrypt
 import jwt
 from fastapi import Depends, HTTPException
 from fastapi.security import OAuth2PasswordBearer
@@ -33,53 +34,28 @@ def get_secret_key() -> str:
     )
 
 
-def get_demo_auth_enabled() -> bool:
-    """Enable insecure demo authentication fallback.
-
-    When enabled, the project accepts the demo passwords even if passlib is missing.
-    Set SRC_ALLOW_INSECURE_DEMO_AUTH=0 to disable this behavior.
-    """
-
-    return os.environ.get("SRC_ALLOW_INSECURE_DEMO_AUTH", "1") not in {
-        "0",
-        "false",
-        "False",
-    }
-
-
-try:
-    from passlib.context import CryptContext
-
-    PWD_CONTEXT: Any = CryptContext(schemes=["bcrypt"], deprecated="auto")
-except Exception:  # pragma: no cover
-    PWD_CONTEXT = None
-
-
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/token")
 
 
 def verify_password(plain_password: str, hashed_password: str) -> bool:
-    """Verify a password.
+    """Verify a password against its bcrypt hash.
 
-    Uses passlib/bcrypt when available.
-    Falls back to a demo-mode validation if explicitly enabled.
+    Utilise directement la librairie bcrypt plutôt que passlib.CryptContext.
+    Correctif définitif de INC-V2-012 (JOURNAL_ERREURS_ET_FIXES_FR.md) :
+    passlib 1.7.4 lève AttributeError sur bcrypt >= 4.1 lors de sa détection
+    de version de backend (``module 'bcrypt' has no attribute '__about__'``),
+    ce qui provoquait un refus de connexion systématique et avait nécessité
+    un mode de secours en clair (fallback démo). Cette fonction ne dépend
+    plus de passlib et vérifie réellement le hash à chaque appel — il n'y a
+    plus de contournement en clair.
     """
 
-    demo_allowed = get_demo_auth_enabled()
-
-    if PWD_CONTEXT is not None:
-        try:
-            return bool(PWD_CONTEXT.verify(plain_password, hashed_password))
-        except Exception:
-            # En environnement POC, on préfère un fallback contrôlé à un blocage total.
-            if demo_allowed:
-                return plain_password in {"ope123", "maint123"}
-            return False
-
-    if not demo_allowed:
+    try:
+        return bcrypt.checkpw(
+            plain_password.encode("utf-8"), hashed_password.encode("utf-8")
+        )
+    except (ValueError, TypeError):
         return False
-
-    return plain_password in {"ope123", "maint123"}
 
 def create_access_token(
     data: dict[str, Any],

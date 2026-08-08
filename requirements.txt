@@ -4,7 +4,7 @@ pydantic
 sqlmodel
 python-multipart
 PyJWT
-passlib[bcrypt]
+bcrypt
 opencv-python
 numpy
 pytest
