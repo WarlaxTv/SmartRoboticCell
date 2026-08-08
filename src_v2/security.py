@@ -13,6 +13,9 @@ from typing import Any
 import jwt
 from fastapi import Depends, HTTPException
 from fastapi.security import OAuth2PasswordBearer
+from sqlmodel import Session
+
+from src_v2.db import get_session, get_user
 
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 60
@@ -54,24 +57,6 @@ except Exception:  # pragma: no cover
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/token")
 
-# Fausse base de données d'utilisateurs (en dur pour la démo)
-# Mots de passe hashés avec bcrypt (ici les hash correspondent à 'ope123' et 'maint123')
-USERS_DB = {
-    "jean_ope": {
-        "username": "jean_ope",
-        "password_hash": (
-            "$2b$12$Z03/Hq.wA2wSIsVw5/W.H.H9aB1Z6w5g5B3aZ2Z5a3B1Z6w5g5B3a"
-        ),  # ope123
-        "role": "OPERATEUR",
-    },
-    "luc_maint": {
-        "username": "luc_maint",
-        "password_hash": (
-            "$2b$12$Z03/Hq.wA2wSIsVw5/W.H.H9aB1Z6w5g5B3aZ2Z5a3B1Z6w5g5B3a"
-        ),  # maint123 (on simule que c'est bon)
-        "role": "MAINTENANCE",
-    },
-}
 
 def verify_password(plain_password: str, hashed_password: str) -> bool:
     """Verify a password.
@@ -107,7 +92,10 @@ def create_access_token(
     to_encode.update({"exp": expire})
     return jwt.encode(to_encode, get_secret_key(), algorithm=ALGORITHM)
 
-async def get_current_user(token: str = Depends(oauth2_scheme)) -> dict[str, str]:
+async def get_current_user(
+    token: str = Depends(oauth2_scheme),
+    session: Session = Depends(get_session),
+) -> dict[str, str]:
     credentials_exception = HTTPException(
         status_code=401,
         detail="Could not validate credentials",
@@ -122,7 +110,7 @@ async def get_current_user(token: str = Depends(oauth2_scheme)) -> dict[str, str
     except jwt.InvalidTokenError as exc:
         raise credentials_exception from exc
 
-    user = USERS_DB.get(username)
+    user = get_user(session, username)
     if user is None:
         raise credentials_exception
     return {"username": username, "role": role}

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import logging
 import os
-from datetime import datetime, timedelta
+from datetime import timedelta
 from typing import Any
 
 import uvicorn
@@ -11,10 +11,12 @@ from fastapi import Depends, FastAPI, HTTPException, Request, status
 from fastapi.responses import HTMLResponse
 from fastapi.security import OAuth2PasswordRequestForm
 from fastapi.templating import Jinja2Templates
+from sqlmodel import Session
 
+from src_v2 import db
+from src_v2.db import get_session
 from src_v2.security import (
     ACCESS_TOKEN_EXPIRE_MINUTES,
-    USERS_DB,
     create_access_token,
     get_current_user,
     require_role,
@@ -25,14 +27,16 @@ LOGGER = logging.getLogger(__name__)
 
 app = FastAPI(title="Supervision Smart Robotic Cell V2 (NF EN 9100)")
 
+# Initialisation de la base SQLite (comptes + historique persistés).
+# Idempotent : peut être appelée à chaque import (y compris sous pytest).
+db.init_db()
+
 # Configuration des templates HTML
 templates_dir = os.path.join(os.path.dirname(__file__), "templates")
 os.makedirs(templates_dir, exist_ok=True)
 templates = Jinja2Templates(directory=templates_dir)
 
-# Historique de maintenance simulé
-maintenance_history: list[dict[str, Any]] = []
-# Appels opérateurs actifs
+# Appels opérateurs actifs (état transitoire, volontairement en mémoire)
 active_maintenance_requests: dict[int, str] = {}  # {cell_id: "username"}
 
 # OPC UA Client configuration
@@ -150,19 +154,20 @@ async def read_root(request: Request):
     return response
 
 @app.post("/token")
-async def login(form_data: OAuth2PasswordRequestForm = Depends()):
+async def login(
+    form_data: OAuth2PasswordRequestForm = Depends(),
+    session: Session = Depends(get_session),
+):
     """OAuth2 password flow endpoint returning a JWT."""
 
-    user_dict = USERS_DB.get(form_data.username)
-    if not user_dict or not verify_password(
-        form_data.password, user_dict["password_hash"]
-    ):
+    user = db.get_user(session, form_data.username)
+    if not user or not verify_password(form_data.password, user.password_hash):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Identifiant ou mot de passe incorrect",
             headers={"WWW-Authenticate": "Bearer"},
         )
-    role = user_dict["role"]
+    role = user.role
 
     access_token_expires = timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
     access_token = create_access_token(
@@ -186,17 +191,17 @@ async def get_status(current_user: dict = Depends(get_current_user)):
 async def request_maintenance(
     cell_id: int,
     current_user: dict = Depends(require_role("OPERATEUR")),
+    session: Session = Depends(get_session),
 ):
     """Permet à un Opérateur de demander une maintenance."""
     # On ajoute la cellule aux requêtes actives
     active_maintenance_requests[cell_id] = current_user["username"]
 
-    maintenance_history.append(
-        {
-            "time": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-            "action": f"Demande d'intervention sur Cellule {cell_id}",
-            "user": current_user["username"],
-        }
+    db.add_history_entry(
+        session,
+        action=f"Demande d'intervention sur Cellule {cell_id}",
+        username_auteur=current_user["username"],
+        cellule_id=cell_id,
     )
     return {"status": "ok", "msg": "Demande enregistrée"}
 
@@ -205,6 +210,7 @@ async def simu_action(
     cell_id: int,
     action: str,
     current_user: dict = Depends(require_role("MAINTENANCE")),
+    session: Session = Depends(get_session),
 ):
     """API secrète pour le POC permettant de forcer des états sur le serveur OPC UA."""
     try:
@@ -263,12 +269,11 @@ async def simu_action(
                 ).write_value(ua.DataValue(ua.Variant(False, ua.VariantType.Boolean)))
                 if cell_id in active_maintenance_requests:
                     del active_maintenance_requests[cell_id]
-                maintenance_history.append(
-                    {
-                        "time": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                        "action": f"Intervention terminée sur Cellule {cell_id}",
-                        "user": current_user["username"],
-                    }
+                db.add_history_entry(
+                    session,
+                    action=f"Intervention terminée sur Cellule {cell_id}",
+                    username_auteur=current_user["username"],
+                    cellule_id=cell_id,
                 )
 
         return {"status": "ok"}
@@ -279,9 +284,18 @@ async def simu_action(
 @app.get("/api/maintenance/history")
 async def get_maintenance_history(
     current_user: dict = Depends(require_role("MAINTENANCE")),
+    session: Session = Depends(get_session),
 ):
-    """Permet à la Maintenance de voir l'historique."""
-    return {"status": "ok", "history": maintenance_history}
+    """Permet à la Maintenance de voir l'historique (persisté en base SQLite)."""
+    history = [
+        {
+            "time": entry.horodatage,
+            "action": entry.action,
+            "user": entry.username_auteur,
+        }
+        for entry in db.list_history(session)
+    ]
+    return {"status": "ok", "history": history}
 
 if __name__ == "__main__":
     print("Démarrage du serveur web de supervision (HTTPS)...")
