@@ -287,10 +287,35 @@ def test_operator_can_request_maintenance(client: TestClient) -> None:
     assert body["status"] == "ok"
 
 
-def test_operator_cannot_read_maintenance_history(client: TestClient) -> None:
-    token = _make_token("jean_ope", "OPERATEUR")
-    resp = client.get("/api/maintenance/history", headers=_auth_header(token))
-    assert resp.status_code == 403
+def test_operator_can_read_only_their_own_maintenance_history(
+    client: TestClient,
+) -> None:
+    """CHG-V2-066 : un Opérateur peut lire /api/maintenance/history, mais ne
+    doit voir que les lignes qu'il a lui-même créées, jamais celles d'un
+    autre utilisateur (opérateur ou Maintenance).
+    """
+    with Session(db.engine) as session:
+        session.add(
+            db.Utilisateur(
+                username="marie_ope",
+                password_hash="unused-in-test",  # noqa: S106 - not a real credential
+                role="OPERATEUR",
+            )
+        )
+        session.commit()
+
+    jean_token = _make_token("jean_ope", "OPERATEUR")
+    marie_token = _make_token("marie_ope", "OPERATEUR")
+    client.post("/api/maintenance/request?cell_id=1", headers=_auth_header(jean_token))
+    client.post("/api/maintenance/request?cell_id=2", headers=_auth_header(marie_token))
+
+    resp = client.get("/api/maintenance/history", headers=_auth_header(jean_token))
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["status"] == "ok"
+    assert len(body["history"]) > 0
+    assert all(item["user"] == "jean_ope" for item in body["history"])
+    assert not any(item["user"] == "marie_ope" for item in body["history"])
 
 
 def test_maintenance_can_read_history_after_request(client: TestClient) -> None:
@@ -353,14 +378,20 @@ def test_generic_request_appears_in_status_until_acknowledged(
     client: TestClient,
 ) -> None:
     op_token = _make_token("jean_ope", "OPERATEUR")
-    client.post("/api/maintenance/request?cell_id=8", headers=_auth_header(op_token))
+    client.post(
+        "/api/maintenance/request?cell_id=8&message=Bruit%20suspect",
+        headers=_auth_header(op_token),
+    )
 
     status_before = client.get("/api/status", headers=_auth_header(op_token)).json()
-    assert status_before["maint_requests"].get("8") == "jean_ope"
+    assert status_before["maint_requests"].get("8") == {
+        "username": "jean_ope",
+        "message": "Bruit suspect",
+    }
 
     maint_token = _make_token("luc_maint", "MAINTENANCE")
     ack_resp = client.post(
-        "/api/maintenance/acknowledge-request?cell_id=8",
+        "/api/maintenance/acknowledge-request?cell_id=8&message=Vérifié%2C%20RAS",
         headers=_auth_header(maint_token),
     )
     assert ack_resp.status_code == 200
@@ -372,10 +403,17 @@ def test_generic_request_appears_in_status_until_acknowledged(
     history = client.get(
         "/api/maintenance/history", headers=_auth_header(maint_token)
     ).json()
-    assert any(
-        "Prise en charge" in item.get("action", "") and item.get("cell_id") == 8
-        for item in history["history"]
+    ack_entry = next(
+        (
+            item
+            for item in history["history"]
+            if "Prise en charge" in item.get("action", "") and item.get("cell_id") == 8
+        ),
+        None,
     )
+    assert ack_entry is not None
+    assert "Bruit suspect" in ack_entry["action"]
+    assert "Vérifié, RAS" in ack_entry["action"]
 
 
 def test_acknowledge_request_forbidden_for_operator(client: TestClient) -> None:
@@ -513,10 +551,15 @@ def test_get_faults_history_ok(client: TestClient) -> None:
     assert any(f["type"] == "Test défaut historique" for f in body["faults"])
 
 
-def test_get_faults_history_forbidden_for_operator(client: TestClient) -> None:
+def test_get_faults_history_readable_by_operator(client: TestClient) -> None:
+    """CHG-V2-066 : l'Opérateur doit pouvoir consulter l'historique des
+    défauts (lecture seule) ; seules les actions d'intervention restent
+    réservées à la Maintenance.
+    """
     token = _make_token("jean_ope", "OPERATEUR")
     resp = client.get("/api/faults/history", headers=_auth_header(token))
-    assert resp.status_code == 403
+    assert resp.status_code == 200
+    assert resp.json()["status"] == "ok"
 
 
 def test_get_faults_history_filters_by_status_and_date(client: TestClient) -> None:
@@ -618,6 +661,60 @@ def test_maintenance_intervention_unknown_defaut_returns_404(
         headers=_auth_header(token),
     )
     assert resp.status_code == 404
+
+
+def test_maintenance_can_report_issue(client: TestClient) -> None:
+    """CHG-V2-065 : la Maintenance peut signaler elle-même un problème sur
+    une cellule (sans attendre un défaut OPC UA ou une demande opérateur) ;
+    le défaut créé apparaît ensuite dans l'historique des défauts.
+    """
+    token = _make_token("luc_maint", "MAINTENANCE")
+    resp = client.post(
+        "/api/maintenance/report-issue"
+        "?cell_id=9&description=Fuite%20hydraulique%20visible&severity=critique",
+        headers=_auth_header(token),
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["status"] == "ok"
+    assert body["id"] is not None
+
+    faults = client.get(
+        "/api/faults/history?cell_id=9", headers=_auth_header(token)
+    ).json()
+    assert any(
+        f["description"] == "Fuite hydraulique visible"
+        and f["severity"] == "critique"
+        and f["fault_status"] == "actif"
+        for f in faults["faults"]
+    )
+
+
+def test_report_issue_rejects_invalid_severity(client: TestClient) -> None:
+    token = _make_token("luc_maint", "MAINTENANCE")
+    resp = client.post(
+        "/api/maintenance/report-issue?cell_id=9&description=Test&severity=grave",
+        headers=_auth_header(token),
+    )
+    assert resp.status_code == 422
+
+
+def test_report_issue_rejects_empty_description(client: TestClient) -> None:
+    token = _make_token("luc_maint", "MAINTENANCE")
+    resp = client.post(
+        "/api/maintenance/report-issue?cell_id=9&description=%20%20&severity=critique",
+        headers=_auth_header(token),
+    )
+    assert resp.status_code == 422
+
+
+def test_report_issue_forbidden_for_operator(client: TestClient) -> None:
+    token = _make_token("jean_ope", "OPERATEUR")
+    resp = client.post(
+        "/api/maintenance/report-issue?cell_id=9&description=Test&severity=critique",
+        headers=_auth_header(token),
+    )
+    assert resp.status_code == 403
 
 
 def test_simu_action_force_fault_then_ack_fault_updates_db(

@@ -51,6 +51,10 @@
                 <div id="advanced-diag" class="diag-line">
                     <div><span class="diag-label" id="label-temp-axes">Température Axes</span> <span id="diag-temp-axes">—</span></div>
                 </div>
+                <div id="active-issues-block" style="margin-top:14px;">
+                    <p class="empty" id="active-issues-loading">Chargement...</p>
+                </div>
+                <button type="button" class="btn btn-maint" id="report-issue-btn" style="margin-top:14px;" onclick="openReportIssueModal()">Signaler un problème</button>
             </div>
             <div class="card">
                 <h2><span id="title-axes-table">Axes moteurs</span></h2>
@@ -111,6 +115,39 @@
         </div>
     </main>
 
+    <!-- Popup "Signaler un problème" (rôle MAINTENANCE) : permet de créer un
+         défaut réel sans attendre un défaut OPC UA ou une demande opérateur -->
+    <div id="report-issue-modal-overlay" class="modal-overlay">
+        <div class="modal-box">
+            <div class="modal-header">
+                <span id="report-issue-modal-title">Signaler un problème</span>
+            </div>
+            <div class="modal-body">
+                <div class="form-field">
+                    <label id="report-issue-severity-label">Sévérité</label>
+                    <div class="radio-choice">
+                        <label id="report-issue-radio-critique-label">
+                            <input type="radio" name="report-issue-severity" value="critique" onchange="updateReportIssueRadioStyle()">
+                            <span id="report-issue-radio-critique-text">Critique</span>
+                        </label>
+                        <label id="report-issue-radio-avertissement-label">
+                            <input type="radio" name="report-issue-severity" value="avertissement" checked onchange="updateReportIssueRadioStyle()">
+                            <span id="report-issue-radio-avertissement-text">Avertissement</span>
+                        </label>
+                    </div>
+                </div>
+                <div class="form-field">
+                    <label for="report-issue-description" id="report-issue-description-label">Description</label>
+                    <textarea id="report-issue-description" rows="3"></textarea>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn secondary" id="report-issue-cancel-btn" onclick="closeReportIssueModal()">Annuler</button>
+                <button class="btn" id="report-issue-submit-btn" onclick="submitReportIssue()">Valider</button>
+            </div>
+        </div>
+    </div>
+
     <script src="/static/common.js"></script>
     <script>
         const cellId = {{ cell_id }};
@@ -143,6 +180,18 @@
                 pressureLegend: "Pression pneumatique (bar)",
                 lubrixLegend: "Niveau lubrifiant (%)",
                 requestedBy: "par",
+                noActiveIssues: "Aucun problème actif signalé sur cette cellule.",
+                activeIssuesTitle: "Problèmes actifs sur cette cellule :",
+                reportIssueBtn: "Signaler un problème",
+                reportIssueModalTitle: "Signaler un problème",
+                reportIssueSeverityLabel: "Sévérité",
+                severityCritique: "Critique",
+                severityAvertissement: "Avertissement",
+                reportIssueDescriptionLabel: "Description",
+                reportIssueCancel: "Annuler",
+                reportIssueSubmit: "Valider",
+                reportIssueSuccess: "Problème signalé.",
+                reportIssueError: "Impossible de signaler le problème (description requise).",
             },
             en: {
                 pageTitleFallback: "Cell {id}",
@@ -168,6 +217,18 @@
                 pressureLegend: "Pneumatic pressure (bar)",
                 lubrixLegend: "Lubricant level (%)",
                 requestedBy: "by",
+                noActiveIssues: "No active issue reported on this cell.",
+                activeIssuesTitle: "Active issues on this cell:",
+                reportIssueBtn: "Report an issue",
+                reportIssueModalTitle: "Report an issue",
+                reportIssueSeverityLabel: "Severity",
+                severityCritique: "Critical",
+                severityAvertissement: "Warning",
+                reportIssueDescriptionLabel: "Description",
+                reportIssueCancel: "Cancel",
+                reportIssueSubmit: "Submit",
+                reportIssueSuccess: "Issue reported.",
+                reportIssueError: "Could not report the issue (description required).",
             },
         };
 
@@ -209,6 +270,8 @@
             document.getElementById('title-maint-history').innerText = t('maintHistoryTitle');
             document.getElementById('faults-loading').innerText = t('loading');
             document.getElementById('maint-loading').innerText = t('loading');
+            const activeIssuesLoading = document.getElementById('active-issues-loading');
+            if (activeIssuesLoading) activeIssuesLoading.innerText = t('loading');
             document.getElementById('axis-selector-label').innerText = t('axisSelectorLabel');
             document.querySelectorAll('.axis-check-label').forEach((el) => {
                 el.innerText = `${t('axisWord')} ${el.dataset.axe}`;
@@ -219,6 +282,14 @@
             document.getElementById('title-chart-courant').innerText = t('chartCourant');
             document.getElementById('title-chart-couple').innerText = t('chartCouple');
             document.getElementById('title-chart-cell').innerText = t('chartCell');
+            document.getElementById('report-issue-btn').innerText = t('reportIssueBtn');
+            document.getElementById('report-issue-modal-title').innerText = t('reportIssueModalTitle');
+            document.getElementById('report-issue-severity-label').innerText = t('reportIssueSeverityLabel');
+            document.getElementById('report-issue-radio-critique-text').innerText = t('severityCritique');
+            document.getElementById('report-issue-radio-avertissement-text').innerText = t('severityAvertissement');
+            document.getElementById('report-issue-description-label').innerText = t('reportIssueDescriptionLabel');
+            document.getElementById('report-issue-cancel-btn').innerText = t('reportIssueCancel');
+            document.getElementById('report-issue-submit-btn').innerText = t('reportIssueSubmit');
             document.getElementById('access-denied-title').innerText = navT('accessDeniedTitle');
             document.getElementById('access-denied-body').innerText = navT('accessDeniedBody');
             document.getElementById('access-denied-back').innerText = navT('accessDeniedBack');
@@ -401,6 +472,24 @@
             } catch (e) { console.error(e); }
         }
 
+        function renderActiveIssues(faults) {
+            const block = document.getElementById('active-issues-block');
+            const active = faults.filter((f) => f.fault_status !== 'resolu');
+            if (active.length === 0) {
+                block.innerHTML = `<p class="empty">${t('noActiveIssues')}</p>`;
+                return;
+            }
+            const items = active.map((f) => `
+                <div class="history-item">
+                    <strong>${f.time}</strong> —
+                    <span class="sev-${f.severity}">${translateFaultText(f.type)}</span>
+                    <span class="${faultStatusTagClass(f.fault_status)}">(${statusLabel(f.fault_status)})</span>
+                    <div style="color:#6E6E73;">${translateFaultText(f.description)}</div>
+                </div>
+            `).join('');
+            block.innerHTML = `<p style="font-weight:600; margin:0 0 6px 0;">${t('activeIssuesTitle')}</p>${items}`;
+        }
+
         async function loadFaults() {
             if (currentRole !== 'MAINTENANCE') return;
             try {
@@ -409,6 +498,7 @@
                 });
                 if (!resp.ok) return;
                 const data = await resp.json();
+                renderActiveIssues(data.faults);
                 const container = document.getElementById('faults-content');
                 if (data.faults.length === 0) {
                     container.innerHTML = `<p class="empty">${t('noFaults')}</p>`;
@@ -423,6 +513,47 @@
                     </div>
                 `).join('');
             } catch (e) { console.error(e); }
+        }
+
+        function openReportIssueModal() {
+            document.getElementById('report-issue-description').value = '';
+            document.querySelector('input[name="report-issue-severity"][value="avertissement"]').checked = true;
+            updateReportIssueRadioStyle();
+            document.getElementById('report-issue-modal-overlay').classList.add('open');
+        }
+
+        function closeReportIssueModal() {
+            document.getElementById('report-issue-modal-overlay').classList.remove('open');
+        }
+
+        function updateReportIssueRadioStyle() {
+            document.querySelectorAll('#report-issue-modal-overlay .radio-choice label').forEach((label) => {
+                const input = label.querySelector('input[type="radio"]');
+                label.classList.toggle('checked', input.checked);
+            });
+        }
+
+        async function submitReportIssue() {
+            const severity = document.querySelector('input[name="report-issue-severity"]:checked').value;
+            const description = document.getElementById('report-issue-description').value.trim();
+            if (!description) {
+                showModal(t('reportIssueError'), 'error');
+                return;
+            }
+            const params = new URLSearchParams({ cell_id: cellId, description, severity });
+            try {
+                const response = await fetch(`/api/maintenance/report-issue?${params.toString()}`, {
+                    method: 'POST',
+                    headers: { 'Authorization': `Bearer ${token}` },
+                });
+                if (!response.ok) throw new Error('request failed');
+                closeReportIssueModal();
+                showModal(t('reportIssueSuccess'), 'success');
+                loadFaults();
+            } catch (e) {
+                console.error(e);
+                showModal(t('reportIssueError'), 'error');
+            }
         }
 
         async function loadMaintenanceHistory() {

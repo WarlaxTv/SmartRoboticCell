@@ -293,7 +293,7 @@
 
         if (!token) {
             window.location.href = '/';
-        } else if (currentRole !== 'MAINTENANCE') {
+        } else if (currentRole !== 'MAINTENANCE' && currentRole !== 'OPERATEUR') {
             applyLanguage();
             document.getElementById('access-denied').classList.remove('hidden');
         } else {

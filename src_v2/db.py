@@ -137,6 +137,13 @@ DEFAUT_STATUT_EN_COURS = "en_cours"
 DEFAUT_STATUT_RESOLU = "resolu"
 DEFAUT_STATUTS = (DEFAUT_STATUT_ACTIF, DEFAUT_STATUT_EN_COURS, DEFAUT_STATUT_RESOLU)
 
+# Sévérités valides pour DefautHistorique.severite (voir champ ci-dessous).
+# Extrait en constante pour que web_server.py puisse valider un signalement
+# manuel de la Maintenance (CHG-V2-065) sans dupliquer les valeurs en dur.
+DEFAUT_SEVERITE_CRITIQUE = "critique"
+DEFAUT_SEVERITE_AVERTISSEMENT = "avertissement"
+DEFAUT_SEVERITES = (DEFAUT_SEVERITE_CRITIQUE, DEFAUT_SEVERITE_AVERTISSEMENT)
+
 
 class DefautHistorique(SQLModel, table=True):
     """Une ligne = un défaut survenu sur une cellule (distinct de l'historique
@@ -236,6 +243,7 @@ def list_history(
     cellule_id: int | None = None,
     since: str | None = None,
     until: str | None = None,
+    username_auteur: str | None = None,
 ) -> list[HistoriqueMaintenance]:
     """Retourne l'historique de maintenance, dans l'ordre chronologique.
 
@@ -243,7 +251,10 @@ def list_history(
     de dates (bornes incluses, format identique à ``horodatage``) si
     ``since``/``until`` sont fournis. Sans filtre, retourne l'historique
     complet de toutes les cellules (comportement inchangé pour les appelants
-    existants).
+    existants). ``username_auteur`` restreint aux lignes créées par un
+    utilisateur précis — utilisé pour qu'un Opérateur ne voie que ses propres
+    demandes (cf. CHG-V2-066), le filtrage étant appliqué côté serveur (pas
+    par le client) pour rester fiable.
     """
 
     query = select(HistoriqueMaintenance)
@@ -253,6 +264,8 @@ def list_history(
         query = query.where(HistoriqueMaintenance.horodatage >= since)
     if until is not None:
         query = query.where(HistoriqueMaintenance.horodatage <= until)
+    if username_auteur is not None:
+        query = query.where(HistoriqueMaintenance.username_auteur == username_auteur)
     query = query.order_by(HistoriqueMaintenance.id)
     return list(session.exec(query))
 

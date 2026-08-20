@@ -42,6 +42,11 @@ SAMPLING_INTERVAL_SECONDS = 15
 
 FAULT_TYPE_MANUAL = "Défaut déclenché manuellement (simulation)"
 
+# Type fixe utilisé pour un défaut signalé manuellement par la Maintenance
+# (POST /api/maintenance/report-issue), pour le distinguer d'un défaut
+# remonté par l'automate ou déclenché depuis le panneau de simulation.
+MAINTENANCE_REPORTED_ISSUE_TYPE = "Anomalie signalée par la Maintenance"
+
 
 def _load_ssl_cert_expiry() -> str | None:
     """Lit la date d'expiration réelle du certificat SSL du serveur.
@@ -137,8 +142,12 @@ static_dir = os.path.join(os.path.dirname(__file__), "static")
 os.makedirs(static_dir, exist_ok=True)
 app.mount("/static", StaticFiles(directory=static_dir), name="static")
 
-# Appels opérateurs actifs (état transitoire, volontairement en mémoire)
-active_maintenance_requests: dict[int, str] = {}  # {cell_id: "username"}
+# Appels opérateurs actifs (état transitoire, volontairement en mémoire).
+# Valeur = {"username": ..., "message": ...} : le message optionnel saisi par
+# l'opérateur doit rester visible sur la demande en attente elle-même (pas
+# seulement enfoui dans l'historique une fois la demande traitée) — cf.
+# CHG-V2-064.
+active_maintenance_requests: dict[int, dict[str, str]] = {}
 
 
 def _html_page(request: Request, template_name: str, context: dict | None = None):
@@ -279,7 +288,7 @@ async def get_faults_history(
     fault_status: str | None = None,
     since: str | None = None,
     until: str | None = None,
-    current_user: dict = Depends(require_role("MAINTENANCE")),
+    current_user: dict = Depends(require_role("MAINTENANCE", "OPERATEUR")),
     session: Session = Depends(get_session),
 ):
     """Retourne l'historique des défauts, du plus récent au plus ancien.
@@ -290,6 +299,11 @@ async def get_faults_history(
     ``since``/``until`` filtrent sur une plage de dates (bornes incluses).
     Nommé ``fault_status`` (et non ``status``) pour ne pas entrer en
     collision avec la clé "status" ("ok") de l'enveloppe de réponse.
+
+    Ouvert en lecture à l'Opérateur (en plus de la Maintenance) — il doit
+    pouvoir consulter l'historique des défauts de ses cellules, sans limite
+    de cellule ou de date (cf. CHG-V2-066). Reste en lecture seule : les
+    actions d'intervention restent réservées à la Maintenance.
     """
     faults = db.list_defauts(
         session, cellule_id=cell_id, statut=fault_status, since=since, until=until
@@ -358,10 +372,15 @@ async def request_maintenance(
     """Permet à un Opérateur de demander une maintenance.
 
     ``message`` est un commentaire libre optionnel saisi par l'opérateur
-    (ex. nature du problème observé) — répercuté tel quel dans l'historique.
+    (ex. nature du problème observé) — répercuté dans l'historique ET gardé
+    sur la demande active elle-même, pour rester visible tant qu'elle n'est
+    pas prise en charge (cf. CHG-V2-064).
     """
     # On ajoute la cellule aux requêtes actives
-    active_maintenance_requests[cell_id] = current_user["username"]
+    active_maintenance_requests[cell_id] = {
+        "username": current_user["username"],
+        "message": message,
+    }
 
     action = f"Demande d'intervention sur Cellule {cell_id}"
     if message:
@@ -379,6 +398,7 @@ async def request_maintenance(
 @app.post("/api/maintenance/acknowledge-request")
 async def acknowledge_maintenance_request(
     cell_id: int,
+    message: str = "",
     current_user: dict = Depends(require_role("MAINTENANCE")),
     session: Session = Depends(get_session),
 ):
@@ -389,22 +409,64 @@ async def acknowledge_maintenance_request(
     précis — elle vit uniquement dans ``active_maintenance_requests``. Ce
     endpoint la retire de la liste des demandes actives et journalise la
     prise en charge, sans toucher à un éventuel défaut (voir
-    /api/maintenance/intervention pour ce cas).
+    /api/maintenance/intervention pour ce cas). ``message`` (optionnel) est
+    le commentaire de la Maintenance sur son intervention ; le message
+    éventuel de l'opérateur (saisi à la demande) est repris dans la même
+    ligne pour garder une trace complète de l'échange (cf. CHG-V2-064).
     """
-    if cell_id not in active_maintenance_requests:
+    request_info = active_maintenance_requests.pop(cell_id, None)
+    if request_info is None:
         raise HTTPException(
             status_code=404, detail="Aucune demande active pour cette cellule"
         )
 
-    active_maintenance_requests.pop(cell_id, None)
+    action = f"Prise en charge de la demande d'intervention sur Cellule {cell_id}"
+    original_message = (
+        request_info.get("message") if isinstance(request_info, dict) else None
+    )
+    if original_message:
+        action += f" (message opérateur : {original_message})"
+    if message:
+        action += f". Notes maintenance : {message}"
 
     db.add_history_entry(
         session,
-        action=f"Prise en charge de la demande d'intervention sur Cellule {cell_id}",
+        action=action,
         username_auteur=current_user["username"],
         cellule_id=cell_id,
     )
     return {"status": "ok"}
+
+
+@app.post("/api/maintenance/report-issue")
+async def report_issue(
+    cell_id: int,
+    description: str,
+    severity: str = "avertissement",
+    current_user: dict = Depends(require_role("MAINTENANCE")),
+    session: Session = Depends(get_session),
+):
+    """Permet à la Maintenance de signaler elle-même un problème sur une
+    cellule, sans attendre un défaut OPC UA ou un appel opérateur.
+
+    Crée un défaut réel (statut "actif") via ``db.add_defaut`` — visible
+    partout où les défauts le sont déjà (historique des défauts, panneau
+    "en attente"), avec un type fixe permettant de le distinguer d'un défaut
+    remonté par l'automate (cf. CHG-V2-065).
+    """
+    if severity not in db.DEFAUT_SEVERITES:
+        raise HTTPException(status_code=422, detail="Sévérité invalide")
+    if not description.strip():
+        raise HTTPException(status_code=422, detail="Description requise")
+
+    defaut = db.add_defaut(
+        session,
+        cellule_id=cell_id,
+        type_defaut=MAINTENANCE_REPORTED_ISSUE_TYPE,
+        severite=severity,
+        description=description.strip(),
+    )
+    return {"status": "ok", "id": defaut.id}
 
 
 @app.post("/api/simu/action")
@@ -456,15 +518,23 @@ async def get_maintenance_history(
     cell_id: int | None = None,
     since: str | None = None,
     until: str | None = None,
-    current_user: dict = Depends(require_role("MAINTENANCE")),
+    current_user: dict = Depends(require_role("MAINTENANCE", "OPERATEUR")),
     session: Session = Depends(get_session),
 ):
-    """Permet à la Maintenance de voir l'historique (persisté en base SQLite).
+    """Retourne l'historique de maintenance (persisté en base SQLite).
 
     Filtre sur ``cell_id``/``since``/``until`` si fournis (utilisé par la
     page de détail d'une cellule et par les filtres de la page dédiée
     /historique-maintenance), sinon retourne l'historique complet.
+
+    Un Opérateur ne voit que ses propres demandes (lignes qu'il a
+    lui-même créées) : le filtre par auteur est forcé côté serveur dès que
+    le rôle n'est pas MAINTENANCE, sans dépendre d'un paramètre envoyé par
+    le client (cf. CHG-V2-066).
     """
+    username_filter = (
+        None if current_user["role"] == "MAINTENANCE" else current_user["username"]
+    )
     history = [
         {
             "time": entry.horodatage,
@@ -475,7 +545,11 @@ async def get_maintenance_history(
             "probleme_resolu": entry.probleme_resolu,
         }
         for entry in db.list_history(
-            session, cellule_id=cell_id, since=since, until=until
+            session,
+            cellule_id=cell_id,
+            since=since,
+            until=until,
+            username_auteur=username_filter,
         )
     ]
     return {"status": "ok", "history": history}

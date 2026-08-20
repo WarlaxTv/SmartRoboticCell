@@ -94,13 +94,21 @@ async def get_current_user(
     return {"username": username, "role": role}
 
 
-def require_role(required_role: str) -> Callable[[dict[str, str]], dict[str, str]]:
-    """FastAPI dependency enforcing a specific role."""
+def require_role(
+    *allowed_roles: str,
+) -> Callable[[dict[str, str]], dict[str, str]]:
+    """FastAPI dependency enforcant un rôle parmi ``allowed_roles``.
+
+    Accepte un ou plusieurs rôles (ex. ``require_role("MAINTENANCE",
+    "OPERATEUR")``) pour les endpoints en lecture partagée entre les deux
+    rôles (ex. historique des défauts), tout en gardant la forme à un seul
+    argument pour les endpoints strictement réservés à un rôle.
+    """
 
     def role_checker(
         current_user: dict[str, str] = Depends(get_current_user),
     ) -> dict[str, str]:
-        if current_user["role"] != required_role:
+        if current_user["role"] not in allowed_roles:
             raise HTTPException(
                 status_code=403,
                 detail="Rôle insuffisant pour cette action",

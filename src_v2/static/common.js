@@ -60,6 +60,7 @@ const FAULT_TEXT_FR_TO_EN = [
     ["Défaut préhenseur / pince", "Gripper fault"],
     ["Défaut déclenché manuellement (simulation)", "Fault manually triggered (simulation)"],
     ["Défaut forcé depuis le panneau de simulation (POC).", "Fault forced from the simulation panel (POC)."],
+    ["Anomalie signalée par la Maintenance", "Issue reported by Maintenance"],
     ["(jeu de données historique)", "(historical demo dataset)"],
     ["Cellule", "Cell"],
 ];
@@ -132,15 +133,21 @@ function renderTopNav(activePage, role) {
     if (!root) return;
 
     const isMaint = role === 'MAINTENANCE';
+    const isOperator = role === 'OPERATEUR';
     const link = (page, href, label) => {
         const activeClass = activePage === page ? ' class="active"' : '';
         return `<a href="${href}"${activeClass}>${label}</a>`;
     };
 
     const links = [link('main', '/', navT('navMainView'))];
-    if (isMaint) {
+    // Historique maintenance/défauts : accessible en lecture à l'Opérateur
+    // aussi (ses propres demandes + tous les défauts, cf. CHG-V2-066) ;
+    // Données (export CSV inclus) reste réservé à la Maintenance.
+    if (isMaint || isOperator) {
         links.push(link('maint-history', '/historique-maintenance', navT('navMaintHistory')));
         links.push(link('fault-history', '/historique-pannes', navT('navFaultHistory')));
+    }
+    if (isMaint) {
         links.push(link('data', '/donnees', navT('navData')));
     }
 
@@ -364,15 +371,24 @@ let chartZoomInstance = null;
  * fenêtre modale plein écran). Chart.js ne permet pas de déplacer une
  * instance existante vers un autre <canvas> : on reconstruit un nouveau
  * graphique avec les mêmes jeux de données/options sur un plus grand canvas.
+ *
+ * ``labels`` est optionnel : à fournir explicitement quand l'appelant a dû
+ * fusionner/trier lui-même les horodatages de plusieurs séries (cf.
+ * data_comparison.html et INC-V2-021) — sans quoi la version agrandie
+ * réintroduirait les mêmes sauts en arrière que le graphique d'origine.
+ * Omis (undefined), Chart.js retrouve son comportement par défaut
+ * (extraction des catégories depuis le champ "x" de chaque point), utilisé
+ * par cell_detail.html où une seule série par axe suffit.
  */
-function openChartZoom(title, datasets, options) {
+function openChartZoom(title, datasets, options, labels) {
     const overlay = ensureChartZoomRoot();
     document.getElementById('chart-zoom-title').innerText = title;
     if (chartZoomInstance) chartZoomInstance.destroy();
     const ctx = document.getElementById('chart-zoom-canvas');
+    const data = labels ? { labels, datasets } : { datasets };
     chartZoomInstance = new Chart(ctx, {
         type: 'line',
-        data: { datasets },
+        data,
         options: options || {},
     });
     overlay.classList.add('open');

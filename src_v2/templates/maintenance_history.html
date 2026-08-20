@@ -44,7 +44,7 @@
             <button class="btn btn-reset" id="filter-reset-btn" onclick="resetFilters()">Réinitialiser</button>
         </div>
 
-        <div class="pending-panel">
+        <div class="pending-panel" id="pending-panel">
             <div class="pending-toggle-row">
                 <label>
                     <input type="checkbox" id="pending-toggle" checked onchange="togglePendingVisibility()">
@@ -95,9 +95,13 @@
                 genericPendingTitle: "Demandes génériques (sans défaut associé)",
                 noGenericPending: "<p>Aucune demande générique en attente.</p>",
                 ackButton: "Prise en charge",
+                ackPromptTitle: "Prise en charge de la demande",
+                ackPromptPlaceholder: "Notes de la Maintenance (optionnel)...",
                 ackSuccess: "Demande prise en charge.",
                 ackError: "Erreur lors de la prise en charge.",
+                requestMessage: "Message",
                 historyTitle: "Interventions réalisées",
+                historyTitleOperator: "Historique de mes demandes de maintenance",
                 onDefaut: "sur le défaut",
                 outcomeResolved: "résolu",
                 outcomeOngoing: "reste actif",
@@ -119,9 +123,13 @@
                 genericPendingTitle: "Generic requests (no associated fault)",
                 noGenericPending: "<p>No pending generic request.</p>",
                 ackButton: "Acknowledge",
+                ackPromptTitle: "Acknowledge request",
+                ackPromptPlaceholder: "Maintenance notes (optional)...",
                 ackSuccess: "Request acknowledged.",
                 ackError: "Error while acknowledging the request.",
+                requestMessage: "Message",
                 historyTitle: "Completed interventions",
+                historyTitleOperator: "History of my maintenance requests",
                 onDefaut: "on fault",
                 outcomeResolved: "resolved",
                 outcomeOngoing: "still active",
@@ -150,7 +158,7 @@
             document.getElementById('pending-loading-label').innerText = t('pendingLoading');
             document.getElementById('generic-pending-title').innerText = t('genericPendingTitle');
             document.getElementById('generic-pending-loading-label').innerText = t('pendingLoading');
-            document.getElementById('history-title').innerText = t('historyTitle');
+            document.getElementById('history-title').innerText = currentRole === 'OPERATEUR' ? t('historyTitleOperator') : t('historyTitle');
             for (const cellId of [1, 2, 3]) {
                 const opt = document.querySelector(`#cell-filter option[value="${cellId}"]`);
                 if (opt) opt.innerText = cellDisplayName(cellId);
@@ -248,16 +256,28 @@
                 if (entries.length === 0) {
                     container.innerHTML = t('noGenericPending');
                 } else {
-                    container.innerHTML = entries.map(([cellId, username]) =>
-                        `<div class="history-item"><div class="history-item-main">${cellDisplayName(cellId)} — <em>(${t('requestedBy')} ${username})</em></div><button class="btn btn-intervene" onclick="acknowledgeGenericRequest(${cellId})">${t('ackButton')}</button></div>`
-                    ).join('');
+                    container.innerHTML = entries.map(([cellId, info]) => {
+                        const username = (info && info.username) || info;
+                        const message = info && info.message
+                            ? `<div style="color:#6E6E73;">${t('requestMessage')} : ${info.message}</div>`
+                            : '';
+                        return `<div class="history-item"><div class="history-item-main">${cellDisplayName(cellId)} — <em>(${t('requestedBy')} ${username})</em>${message}</div><button class="btn btn-intervene" onclick="openAckPrompt(${cellId})">${t('ackButton')}</button></div>`;
+                    }).join('');
                 }
             } catch (e) { console.error(e); }
         }
 
-        async function acknowledgeGenericRequest(cellId) {
+        function openAckPrompt(cellId) {
+            openTextPromptModal(t('ackPromptTitle'), t('ackPromptPlaceholder'), (message) => {
+                acknowledgeGenericRequest(cellId, message);
+            });
+        }
+
+        async function acknowledgeGenericRequest(cellId, message) {
             try {
-                const response = await fetch(`/api/maintenance/acknowledge-request?cell_id=${cellId}`, {
+                const params = new URLSearchParams({ cell_id: cellId });
+                if (message) params.set('message', message);
+                const response = await fetch(`/api/maintenance/acknowledge-request?${params.toString()}`, {
                     method: 'POST',
                     headers: { 'Authorization': `Bearer ${token}` },
                 });
@@ -272,17 +292,27 @@
 
         function fetchAll() {
             fetchHistory();
-            fetchPending();
-            fetchGenericPending();
+            if (currentRole === 'MAINTENANCE') {
+                fetchPending();
+                fetchGenericPending();
+            }
         }
 
         if (!token) {
             window.location.href = '/';
-        } else if (currentRole !== 'MAINTENANCE') {
+        } else if (currentRole !== 'MAINTENANCE' && currentRole !== 'OPERATEUR') {
             applyLanguage();
             document.getElementById('access-denied').classList.remove('hidden');
         } else {
             applyLanguage();
+            // Le panneau "Demandes en attente" (défauts actifs + demandes
+            // génériques, avec actions "Intervenir"/"Prise en charge") est un
+            // outil de travail Maintenance ; l'Opérateur ne voit que
+            // l'historique de SES propres demandes (déjà filtré côté serveur,
+            // cf. CHG-V2-066), sans ce panneau.
+            if (currentRole === 'OPERATEUR') {
+                document.getElementById('pending-panel').classList.add('hidden');
+            }
             document.getElementById('page-content').classList.remove('hidden');
             fetchAll();
             setInterval(fetchAll, 5000);

@@ -377,13 +377,19 @@
                         
                         let alarmsHtml = cell.alarms ? `<div class="alarms-box critical"><span class="dot" style="background:#FF3B30;"></span>${cell.alarms}</div>` : '';
                         
-                        // Bouton d'appel maintenance (visible que pour l'opérateur) - n'est plus obligatoire !
+                        // Bouton d'appel maintenance (visible que pour l'opérateur), toujours
+                        // disponible désormais — l'opérateur doit pouvoir signaler un problème
+                        // qu'il constate lui-même, même si les seuils automatiques (temps avant
+                        // maintenance, défaut OPC UA) ne l'exigent pas encore (cf. CHG-V2-067,
+                        // signalé par l'utilisateur : "je n'ai pas de bouton pour faire de
+                        // demande de maintenance en tant qu'opérateur" quand needsIntervention
+                        // était faux). Seule une demande déjà active sur CETTE cellule masque
+                        // le bouton, pour éviter les doublons.
                         let btnHtml = '';
-                        const needsIntervention = isMaintReq || cell.fault;
-                        if (currentRole === "OPERATEUR" && needsIntervention && !data.maint_requests[cell.id]) {
-                            btnHtml = `<button class="btn btn-maint" onclick="callMaintenance(${cell.id})" style="margin-top: 15px;">${t('requestMaintenance')}</button>`;
-                        } else if (currentRole === "OPERATEUR" && data.maint_requests[cell.id]) {
+                        if (currentRole === "OPERATEUR" && data.maint_requests[cell.id]) {
                             btnHtml = `<p style="color:#34C759; font-weight:bold; font-size:0.85em; margin-top: 15px;">${t('maintenanceRequested')}</p>`;
+                        } else if (currentRole === "OPERATEUR") {
+                            btnHtml = `<button class="btn btn-maint" onclick="callMaintenance(${cell.id})" style="margin-top: 15px;">${t('requestMaintenance')}</button>`;
                         }
 
                         const card = document.createElement('div');
