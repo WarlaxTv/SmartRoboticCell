@@ -327,16 +327,32 @@ async def get_cells(
     current_user: dict = Depends(get_current_user),
     session: Session = Depends(get_session),
 ):
-    """Retourne la liste des cellules existantes (id + nom).
+    """Retourne la liste des cellules existantes (id, nom, type de robot,
+    adresse IP).
 
     Ouvert à tout rôle authentifié (pas seulement ADMIN) : c'est la source
     utilisée par common.js::loadCellNames() pour afficher le nom des
     cellules (dashboard, historiques, page de données) — un besoin partagé
     par tous les rôles, distinct de la gestion des cellules elle-même
-    (POST /api/admin/cells, réservé à ADMIN).
+    (POST/PATCH/DELETE /api/admin/cells, réservé à ADMIN). type_robot et
+    adresse_ip sont inclus (pas seulement id/nom) : ces informations sont
+    déjà visibles de tout rôle authentifié sur le dashboard principal
+    (carte de chaque cellule), et /administration en a besoin pour
+    pré-remplir le formulaire de modification d'une cellule.
     """
     cellules = db.list_cellules(session)
-    return {"status": "ok", "cells": [{"id": c.id, "nom": c.nom} for c in cellules]}
+    return {
+        "status": "ok",
+        "cells": [
+            {
+                "id": c.id,
+                "nom": c.nom,
+                "type_robot": c.type_robot,
+                "adresse_ip": c.adresse_ip,
+            }
+            for c in cellules
+        ],
+    }
 
 
 @app.get("/api/admin/users")
@@ -418,6 +434,90 @@ async def create_admin_cell(
         "type_robot": cellule.type_robot,
         "adresse_ip": cellule.adresse_ip,
     }
+
+
+@app.patch("/api/admin/users/{username}")
+async def update_admin_user_role(
+    username: str,
+    payload: dict,
+    current_user: dict = Depends(require_role("ADMIN")),
+    session: Session = Depends(get_session),
+):
+    """Change le rôle (OPERATEUR <-> MAINTENANCE) d'un compte existant.
+
+    Réponse directe à la demande utilisateur ("en tant qu'admin ... je dois
+    aussi pouvoir changer les rôles des comptes déjà existants"). Le rôle
+    ADMIN est exclu des deux côtés (cible ET compte visé, cf.
+    db.update_user_role) : ni promotion à ADMIN, ni rétrogradation d'un
+    compte ADMIN existant, par cette voie.
+    """
+    new_role = payload.get("role") or ""
+    if new_role not in db.CREATABLE_ROLES:
+        raise HTTPException(
+            status_code=422,
+            detail=f"Rôle invalide (attendu : {', '.join(db.CREATABLE_ROLES)})",
+        )
+
+    try:
+        user = db.update_user_role(session, username, new_role)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+    return {"status": "ok", "username": user.username, "role": user.role}
+
+
+@app.patch("/api/admin/cells/{cellule_id}")
+async def update_admin_cell(
+    cellule_id: int,
+    payload: dict,
+    current_user: dict = Depends(require_role("ADMIN")),
+    session: Session = Depends(get_session),
+):
+    """Modifie le nom/type de robot/adresse IP d'une cellule existante.
+
+    Même mise en garde que la création : n'a d'effet sur le serveur OPC UA
+    en cours d'exécution qu'après son redémarrage (cf. CHG-V2-088).
+    """
+    nom = (payload.get("nom") or "").strip()
+    type_robot = (payload.get("type_robot") or "").strip()
+    adresse_ip = (payload.get("adresse_ip") or "").strip()
+
+    if not nom or not type_robot or not adresse_ip:
+        raise HTTPException(
+            status_code=422, detail="Nom, type de robot et adresse IP requis"
+        )
+
+    try:
+        cellule = db.update_cellule(session, cellule_id, nom, type_robot, adresse_ip)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+    return {
+        "status": "ok",
+        "id": cellule.id,
+        "nom": cellule.nom,
+        "type_robot": cellule.type_robot,
+        "adresse_ip": cellule.adresse_ip,
+    }
+
+
+@app.delete("/api/admin/cells/{cellule_id}")
+async def delete_admin_cell(
+    cellule_id: int,
+    current_user: dict = Depends(require_role("ADMIN")),
+    session: Session = Depends(get_session),
+):
+    """Supprime une cellule (cf. db.delete_cellule : l'historique associé
+    est conservé, seule la fiche de la cellule disparaît). Réponse directe à
+    la demande utilisateur ("il faut également que je puisse supprimer une
+    cellule si besoin").
+    """
+    try:
+        db.delete_cellule(session, cellule_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+    return {"status": "ok"}
 
 
 @app.get("/api/cell/{cell_id}/axes")
@@ -619,6 +719,7 @@ async def request_maintenance(
 @app.post("/api/maintenance/acknowledge-request")
 async def acknowledge_maintenance_request(
     cell_id: int,
+    probleme_resolu: bool,
     message: str = "",
     current_user: dict = Depends(require_role("MAINTENANCE")),
     session: Session = Depends(get_session),
@@ -630,10 +731,28 @@ async def acknowledge_maintenance_request(
     précis — elle vit uniquement dans ``active_maintenance_requests``. Ce
     endpoint la retire de la liste des demandes actives et journalise la
     prise en charge, sans toucher à un éventuel défaut (voir
-    /api/maintenance/intervention pour ce cas). ``message`` (optionnel) est
-    le commentaire de la Maintenance sur son intervention ; le message
-    éventuel de l'opérateur (saisi à la demande) est repris dans la même
-    ligne pour garder une trace complète de l'échange (cf. CHG-V2-064).
+    /api/maintenance/intervention pour ce cas).
+
+    ``probleme_resolu`` est désormais obligatoire (cf. demande utilisateur :
+    "il faudrait que ce soit comme pour les défauts avec (en cours, ou
+    résolu)") : comme pour une intervention sur un défaut précis, la
+    Maintenance déclare si le problème est résolu ou seulement pris en
+    charge (reste actif). Contrairement à un défaut, il n'existe pas de
+    ligne dédiée dont on puisse changer le statut ("en_cours"/"resolu") pour
+    une demande générique — c'est donc uniquement la ligne d'historique
+    créée ici (``probleme_resolu``) qui porte ce résultat, exploitée telle
+    quelle par ``outcomeTag()`` côté frontend (même rendu que pour les
+    défauts). La demande est retirée de ``active_maintenance_requests`` dans
+    les deux cas (résolu ou non) : ce dict ne représente qu'une demande *pas
+    encore prise en charge*, pas le suivi de sa résolution — une fois la
+    Maintenance au courant et ayant statué, elle n'a plus lieu d'apparaître
+    comme "en attente" sur le dashboard, que le problème soit clos ou encore
+    en cours (dans ce dernier cas, il reste tracé dans l'historique).
+
+    ``message`` (optionnel) est le commentaire de la Maintenance sur son
+    intervention ; le message éventuel de l'opérateur (saisi à la demande)
+    est repris dans la même ligne pour garder une trace complète de
+    l'échange (cf. CHG-V2-064).
     """
     request_info = active_maintenance_requests.pop(cell_id, None)
     if request_info is None:
@@ -641,7 +760,11 @@ async def acknowledge_maintenance_request(
             status_code=404, detail="Aucune demande active pour cette cellule"
         )
 
-    action = f"Prise en charge de la demande d'intervention sur Cellule {cell_id}"
+    resultat_label = "résolu" if probleme_resolu else "toujours actif"
+    action = (
+        f"Prise en charge de la demande d'intervention sur Cellule {cell_id} "
+        f"— {resultat_label}"
+    )
     original_message = (
         request_info.get("message") if isinstance(request_info, dict) else None
     )
@@ -655,6 +778,7 @@ async def acknowledge_maintenance_request(
         action=action,
         username_auteur=current_user["username"],
         cellule_id=cell_id,
+        probleme_resolu=probleme_resolu,
     )
     return {"status": "ok"}
 

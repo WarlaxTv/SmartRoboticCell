@@ -331,6 +331,32 @@ def create_user(
     return user
 
 
+def update_user_role(session: Session, username: str, new_role: str) -> Utilisateur:
+    """Change le rôle d'un compte existant (OPERATEUR <-> MAINTENANCE).
+
+    Lève ValueError si le compte est introuvable, ou si son rôle ACTUEL est
+    ADMIN : volontairement impossible de rétrograder un compte Administrateur
+    par cette voie (y compris l'admin qui fait l'appel lui-même), pour éviter
+    qu'une erreur de manipulation ne verrouille l'accès à la page
+    d'administration elle-même (cf. CREATABLE_ROLES, même logique que pour
+    la création : promouvoir un compte à ADMIN n'est pas non plus proposé
+    ici, seul un accès direct à la base le permettrait). web_server.py
+    traduit ces ValueError en 404/409 selon le cas.
+    """
+
+    user = get_user(session, username)
+    if user is None:
+        raise ValueError(f"Compte « {username} » introuvable")
+    if user.role == "ADMIN":
+        raise ValueError("Le rôle d'un compte ADMIN ne peut pas être modifié ici")
+
+    user.role = new_role
+    session.add(user)
+    session.commit()
+    session.refresh(user)
+    return user
+
+
 def list_cellules(session: Session) -> list[Cellule]:
     """Retourne toutes les cellules existantes, triées par id.
 
@@ -359,6 +385,53 @@ def add_cellule(
     session.commit()
     session.refresh(cellule)
     return cellule
+
+
+def update_cellule(
+    session: Session, cellule_id: int, nom: str, type_robot: str, adresse_ip: str
+) -> Cellule:
+    """Modifie le nom/type de robot/adresse IP d'une cellule existante.
+
+    Lève ValueError si l'id est inconnu (web_server.py traduit en 404). Même
+    remarque que ``add_cellule`` : sans effet sur le serveur OPC UA en cours
+    d'exécution tant qu'il n'est pas redémarré, celui-ci n'ayant lu ces
+    valeurs qu'une fois, à son propre démarrage.
+    """
+
+    cellule = session.get(Cellule, cellule_id)
+    if cellule is None:
+        raise ValueError(f"Cellule #{cellule_id} introuvable")
+
+    cellule.nom = nom
+    cellule.type_robot = type_robot
+    cellule.adresse_ip = adresse_ip
+    session.add(cellule)
+    session.commit()
+    session.refresh(cellule)
+    return cellule
+
+
+def delete_cellule(session: Session, cellule_id: int) -> None:
+    """Supprime une cellule.
+
+    Lève ValueError si l'id est inconnu (web_server.py traduit en 404).
+    Supprime uniquement la ligne ``Cellule`` : l'historique déjà associé à
+    cet id (MesureAxe, MesureCellule, DefautHistorique, HistoriqueMaintenance)
+    n'est PAS purgé — ces tables référencent ``cellule_id`` par convention,
+    sans clé étrangère (cf. commentaire de MesureAxe), donc rien n'empêche
+    de le conserver comme archive même une fois la cellule supprimée. Une
+    cellule supprimée disparaît du dashboard/des filtres à la prochaine
+    lecture de ``list_cellules()``, mais reste visible dans le serveur OPC
+    UA en cours d'exécution jusqu'à son redémarrage (même contrainte que la
+    création, cf. add_cellule).
+    """
+
+    cellule = session.get(Cellule, cellule_id)
+    if cellule is None:
+        raise ValueError(f"Cellule #{cellule_id} introuvable")
+
+    session.delete(cellule)
+    session.commit()
 
 
 def add_history_entry(

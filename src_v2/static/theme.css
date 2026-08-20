@@ -368,6 +368,15 @@ a.btn, a.btn:hover, a.btn:visited { text-decoration: none; }
     font-size: 0.72em; font-weight: 700; padding: 3px 9px; border-radius: 999px;
     background: var(--nav-bg); color: white; letter-spacing: 0.02em;
 }
+.admin-list-item select {
+    padding: 6px 10px; border-radius: var(--radius-sm); border: 1px solid var(--border);
+    background: var(--bg); font-size: 0.85em; font-family: inherit; cursor: pointer;
+}
+/* Ligne d'une cellule en cours de modification (formulaire inline) :
+   passe en colonne plutôt qu'en ligne, pour laisser la place aux 3 champs
+   et aux boutons Enregistrer/Annuler sans les compresser horizontalement. */
+.admin-list-item-editing { flex-direction: column; align-items: stretch; }
+.admin-list-item-editing .form-field { margin-bottom: 8px; }
 
 .admin-notice {
     margin-top: 18px; padding: 12px 14px; background-color: var(--warn-bg);

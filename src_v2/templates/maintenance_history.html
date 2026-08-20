@@ -39,6 +39,7 @@
                 <input type="date" id="until-filter" class="filter-input" onchange="fetchAll()">
             </div>
             <button class="btn btn-reset" id="filter-reset-btn" onclick="resetFilters()">Réinitialiser</button>
+            <button class="btn hidden" id="download-csv-btn" onclick="downloadMaintenanceCsv()">Télécharger CSV</button>
         </div>
 
         <div class="pending-panel" id="pending-panel">
@@ -72,6 +73,42 @@
         </div>
     </main>
 
+    <!-- Popup "Prise en charge d'une demande générique" (rôle MAINTENANCE
+         uniquement) : même structure (résultat résolu/en cours + notes) que
+         la popup d'intervention sur un défaut de fault_history.html, pour
+         que le suivi d'une demande générique se comporte "comme pour les
+         défauts avec (en cours, ou résolu)" (demande utilisateur). -->
+    <div id="ack-modal-overlay" class="modal-overlay">
+        <div class="modal-box">
+            <div class="modal-header">
+                <span id="ack-modal-title">Prise en charge de la demande</span>
+            </div>
+            <div class="modal-body">
+                <div class="form-field">
+                    <label id="ack-outcome-label">Résultat</label>
+                    <div class="radio-choice">
+                        <label id="ack-radio-resolved-label">
+                            <input type="radio" name="ack-outcome" value="resolved" checked onchange="updateAckRadioStyle()">
+                            <span id="ack-radio-resolved-text">Problème résolu</span>
+                        </label>
+                        <label id="ack-radio-ongoing-label">
+                            <input type="radio" name="ack-outcome" value="ongoing" onchange="updateAckRadioStyle()">
+                            <span id="ack-radio-ongoing-text">Pris en charge, reste actif</span>
+                        </label>
+                    </div>
+                </div>
+                <div class="form-field">
+                    <label for="ack-notes" id="ack-notes-label">Notes (optionnel)</label>
+                    <textarea id="ack-notes" rows="3"></textarea>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn secondary" id="ack-cancel-btn" onclick="closeAckModal()">Annuler</button>
+                <button class="btn" id="ack-submit-btn" onclick="submitAckModal()">Valider</button>
+            </div>
+        </div>
+    </div>
+
     <script src="{{ static_v('common.js') }}"></script>
     <script>
         const I18N = {
@@ -92,8 +129,13 @@
                 genericPendingTitle: "Demandes génériques (sans défaut associé)",
                 noGenericPending: "<p>Aucune demande générique en attente.</p>",
                 ackButton: "Prise en charge",
-                ackPromptTitle: "Prise en charge de la demande",
-                ackPromptPlaceholder: "Notes de la Maintenance (optionnel)...",
+                ackModalTitle: "Prise en charge de la demande",
+                ackOutcomeLabel: "Résultat",
+                ackResolved: "Problème résolu",
+                ackOngoing: "Pris en charge, reste actif",
+                ackNotesLabel: "Notes (optionnel)",
+                ackCancel: "Annuler",
+                ackSubmit: "Valider",
                 ackSuccess: "Demande prise en charge.",
                 ackError: "Erreur lors de la prise en charge.",
                 requestMessage: "Message",
@@ -102,6 +144,13 @@
                 onDefaut: "sur le défaut",
                 outcomeResolved: "résolu",
                 outcomeOngoing: "reste actif",
+                downloadBtn: "Télécharger CSV",
+                csvTime: "Horodatage",
+                csvCell: "Cellule",
+                csvAction: "Action",
+                csvAuthor: "Auteur",
+                csvOutcome: "Résultat",
+                csvOutcomeNone: "",
             },
             en: {
                 pageTitle: "Maintenance Intervention History",
@@ -120,8 +169,13 @@
                 genericPendingTitle: "Generic requests (no associated fault)",
                 noGenericPending: "<p>No pending generic request.</p>",
                 ackButton: "Acknowledge",
-                ackPromptTitle: "Acknowledge request",
-                ackPromptPlaceholder: "Maintenance notes (optional)...",
+                ackModalTitle: "Acknowledge request",
+                ackOutcomeLabel: "Outcome",
+                ackResolved: "Problem resolved",
+                ackOngoing: "Taken care of, still active",
+                ackNotesLabel: "Notes (optional)",
+                ackCancel: "Cancel",
+                ackSubmit: "Submit",
                 ackSuccess: "Request acknowledged.",
                 ackError: "Error while acknowledging the request.",
                 requestMessage: "Message",
@@ -130,6 +184,13 @@
                 onDefaut: "on fault",
                 outcomeResolved: "resolved",
                 outcomeOngoing: "still active",
+                downloadBtn: "Download CSV",
+                csvTime: "Timestamp",
+                csvCell: "Cell",
+                csvAction: "Action",
+                csvAuthor: "Author",
+                csvOutcome: "Outcome",
+                csvOutcomeNone: "",
             },
         };
 
@@ -149,6 +210,7 @@
             document.getElementById('filter-since-label').innerText = t('sinceFilterLabel');
             document.getElementById('filter-until-label').innerText = t('untilFilterLabel');
             document.getElementById('filter-reset-btn').innerText = t('resetFilters');
+            document.getElementById('download-csv-btn').innerText = t('downloadBtn');
             document.getElementById('cell-filter').options[0].innerText = t('allCells');
             document.getElementById('pending-toggle-label').innerText = t('pendingToggleLabel');
             document.getElementById('pending-title').innerText = t('pendingTitle');
@@ -159,6 +221,13 @@
             document.getElementById('access-denied-title').innerText = navT('accessDeniedTitle');
             document.getElementById('access-denied-body').innerText = navT('accessDeniedBody');
             document.getElementById('access-denied-back').innerText = navT('accessDeniedBack');
+            document.getElementById('ack-modal-title').innerText = t('ackModalTitle');
+            document.getElementById('ack-outcome-label').innerText = t('ackOutcomeLabel');
+            document.getElementById('ack-radio-resolved-text').innerText = t('ackResolved');
+            document.getElementById('ack-radio-ongoing-text').innerText = t('ackOngoing');
+            document.getElementById('ack-notes-label').innerText = t('ackNotesLabel');
+            document.getElementById('ack-cancel-btn').innerText = t('ackCancel');
+            document.getElementById('ack-submit-btn').innerText = t('ackSubmit');
             renderTopNav('maint-history', currentRole);
         }
 
@@ -197,15 +266,29 @@
             return params;
         }
 
+        // Étiquette de résultat affichée à côté d'une ligne d'historique.
+        // ``item.defaut_id`` n'est renseigné que pour une intervention liée
+        // à un défaut précis (page Historique des défauts) ; pour une
+        // demande générique prise en charge (cf. acknowledgeGenericRequest),
+        // il vaut null — dans ce cas on omet la mention "(sur le défaut
+        // #...)"  plutôt que d'afficher "#null" (cf. CHG-V2-092/093, suivi
+        // en_cours/résolu des demandes génériques).
         function outcomeTag(item) {
-            if (item.probleme_resolu === true) {
-                return `<span class="resolved-tag">(${t('onDefaut')} #${item.defaut_id} — ${t('outcomeResolved')})</span>`;
+            if (item.probleme_resolu !== true && item.probleme_resolu !== false) {
+                return '';
             }
-            if (item.probleme_resolu === false) {
-                return `<span class="status-en-cours-tag">(${t('onDefaut')} #${item.defaut_id} — ${t('outcomeOngoing')})</span>`;
-            }
-            return '';
+            const cssClass = item.probleme_resolu ? 'resolved-tag' : 'status-en-cours-tag';
+            const outcomeLabel = item.probleme_resolu ? t('outcomeResolved') : t('outcomeOngoing');
+            const context = (item.defaut_id !== null && item.defaut_id !== undefined)
+                ? `${t('onDefaut')} #${item.defaut_id} — `
+                : '';
+            return `<span class="${cssClass}">(${context}${outcomeLabel})</span>`;
         }
+
+        // Dernier historique chargé (déjà filtré côté serveur selon les
+        // filtres actifs), réutilisé par le téléchargement CSV sans refaire
+        // d'appel réseau.
+        let lastHistory = [];
 
         async function fetchHistory() {
             try {
@@ -214,6 +297,7 @@
                 });
                 const data = await response.json();
                 if (data.status === 'ok') {
+                    lastHistory = data.history;
                     const container = document.getElementById('history-content');
                     if (data.history.length === 0) {
                         container.innerHTML = t('noInterventions');
@@ -224,6 +308,27 @@
                     }
                 }
             } catch (e) { console.error(e); }
+        }
+
+        function outcomeCsvValue(item) {
+            if (item.probleme_resolu === true) return t('outcomeResolved');
+            if (item.probleme_resolu === false) return t('outcomeOngoing');
+            return t('csvOutcomeNone');
+        }
+
+        // Téléchargement CSV de l'historique des interventions actuellement
+        // affiché (respecte les filtres cellule/dates en cours), réservé à
+        // la Maintenance/Admin comme les autres téléchargements du site.
+        function downloadMaintenanceCsv() {
+            const header = [t('csvTime'), t('csvCell'), t('csvAction'), t('csvAuthor'), t('csvOutcome')];
+            const rows = lastHistory.slice().reverse().map((h) => [
+                h.time,
+                cellDisplayName(h.cell_id),
+                h.action,
+                h.user,
+                outcomeCsvValue(h),
+            ]);
+            downloadCsv('historique_maintenance.csv', header, rows);
         }
 
         async function fetchPending() {
@@ -272,21 +377,54 @@
             } catch (e) { console.error(e); }
         }
 
+        // Cellule ciblée par la popup de prise en charge actuellement ouverte
+        // (null si aucune) — même pattern que interventionTargetDefautId
+        // dans fault_history.html.
+        let ackTargetCellId = null;
+
         function openAckPrompt(cellId) {
-            openTextPromptModal(t('ackPromptTitle'), t('ackPromptPlaceholder'), (message) => {
-                acknowledgeGenericRequest(cellId, message);
+            ackTargetCellId = cellId;
+            document.getElementById('ack-notes').value = '';
+            document.querySelector('input[name="ack-outcome"][value="resolved"]').checked = true;
+            updateAckRadioStyle();
+            document.getElementById('ack-modal-overlay').classList.add('open');
+        }
+
+        function closeAckModal() {
+            document.getElementById('ack-modal-overlay').classList.remove('open');
+            ackTargetCellId = null;
+        }
+
+        function updateAckRadioStyle() {
+            document.querySelectorAll('#ack-modal-overlay .radio-choice label').forEach((label) => {
+                const input = label.querySelector('input[type="radio"]');
+                label.classList.toggle('checked', input.checked);
             });
         }
 
-        async function acknowledgeGenericRequest(cellId, message) {
+        async function submitAckModal() {
+            if (ackTargetCellId === null) return;
+            const resolved = document.querySelector('input[name="ack-outcome"]:checked').value === 'resolved';
+            const notes = document.getElementById('ack-notes').value;
+            await acknowledgeGenericRequest(ackTargetCellId, resolved, notes);
+        }
+
+        // ``probleme_resolu`` est désormais obligatoire (cf. demande
+        // utilisateur : "il faudrait que ce soit comme pour les défauts
+        // avec (en cours, ou résolu)") : la Maintenance déclare si le
+        // problème est résolu ou seulement pris en charge (reste actif),
+        // via la popup ci-dessus — même principe que
+        // submitIntervention() dans fault_history.html.
+        async function acknowledgeGenericRequest(cellId, probleme_resolu, message) {
             try {
-                const params = new URLSearchParams({ cell_id: cellId });
+                const params = new URLSearchParams({ cell_id: cellId, probleme_resolu: probleme_resolu });
                 if (message) params.set('message', message);
                 const response = await fetch(`/api/maintenance/acknowledge-request?${params.toString()}`, {
                     method: 'POST',
                     headers: { 'Authorization': `Bearer ${token}` },
                 });
                 if (response.ok) {
+                    closeAckModal();
                     showModal(t('ackSuccess'), 'success');
                     fetchAll();
                 } else {
@@ -320,6 +458,11 @@
                 // cf. CHG-V2-066), sans ce panneau.
                 if (currentRole === 'OPERATEUR') {
                     document.getElementById('pending-panel').classList.add('hidden');
+                }
+                // Téléchargement réservé à la Maintenance/Admin, comme les
+                // autres exports du site (cf. data_comparison.html).
+                if (hasMaintenanceRights(currentRole)) {
+                    document.getElementById('download-csv-btn').classList.remove('hidden');
                 }
                 document.getElementById('page-content').classList.remove('hidden');
                 fetchAll();

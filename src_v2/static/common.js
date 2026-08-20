@@ -131,6 +131,7 @@ const NAV_I18N = {
         modalInfoTitle: "Information",
         promptSubmit: "Envoyer",
         promptCancel: "Annuler",
+        confirmOk: "Confirmer",
         accessDeniedTitle: "Accès réservé",
         accessDeniedBody: "Cette page est réservée au rôle MAINTENANCE.",
         accessDeniedBodyAdmin: "Cette page est réservée au rôle ADMIN.",
@@ -151,6 +152,7 @@ const NAV_I18N = {
         modalInfoTitle: "Information",
         promptSubmit: "Send",
         promptCancel: "Cancel",
+        confirmOk: "Confirm",
         accessDeniedTitle: "Restricted access",
         accessDeniedBody: "This page is restricted to the MAINTENANCE role.",
         accessDeniedBodyAdmin: "This page is restricted to the ADMIN role.",
@@ -328,6 +330,7 @@ document.addEventListener('keydown', (evt) => {
     if (evt.key === 'Escape') {
         closeModal();
         closeTextPromptModal();
+        closeConfirmModal();
     }
 });
 
@@ -394,6 +397,63 @@ function submitTextPromptModal() {
     const callback = _textPromptCallback;
     closeTextPromptModal();
     if (callback) callback(value);
+}
+
+/* ---------- Fenêtre de confirmation (remplace confirm()) ---------- */
+
+let _confirmCallback = null;
+
+function ensureConfirmRoot() {
+    let overlay = document.getElementById('app-confirm-overlay');
+    if (overlay) return overlay;
+
+    overlay = document.createElement('div');
+    overlay.id = 'app-confirm-overlay';
+    overlay.className = 'modal-overlay';
+    overlay.innerHTML = `
+        <div class="modal-box">
+            <div class="modal-header" id="app-confirm-header"></div>
+            <div class="modal-body" id="app-confirm-body"></div>
+            <div class="modal-footer">
+                <button class="btn btn-reset" id="app-confirm-cancel-btn" onclick="closeConfirmModal()"></button>
+                <button class="btn" id="app-confirm-ok-btn" onclick="submitConfirmModal()"></button>
+            </div>
+        </div>
+    `;
+    document.body.appendChild(overlay);
+    overlay.addEventListener('click', (evt) => {
+        if (evt.target === overlay) closeConfirmModal();
+    });
+    return overlay;
+}
+
+/**
+ * Affiche une popup de confirmation oui/non, à la place d'un confirm()
+ * natif du navigateur. ``callback()`` n'est appelé QUE si l'utilisateur
+ * clique le bouton de confirmation ; un clic sur "Annuler", en dehors de la
+ * popup, ou Échap ferme sans rien appeler. Utilisé pour les actions
+ * destructives (ex. suppression d'une cellule depuis /administration).
+ */
+function openConfirmModal(title, message, callback) {
+    const overlay = ensureConfirmRoot();
+    document.getElementById('app-confirm-header').innerText = title;
+    document.getElementById('app-confirm-body').innerText = message;
+    document.getElementById('app-confirm-cancel-btn').innerText = navT('promptCancel');
+    document.getElementById('app-confirm-ok-btn').innerText = navT('confirmOk');
+    _confirmCallback = callback;
+    overlay.classList.add('open');
+}
+
+function closeConfirmModal() {
+    const overlay = document.getElementById('app-confirm-overlay');
+    if (overlay) overlay.classList.remove('open');
+    _confirmCallback = null;
+}
+
+function submitConfirmModal() {
+    const callback = _confirmCallback;
+    closeConfirmModal();
+    if (callback) callback();
 }
 
 /* ---------- Agrandissement d'un graphique Chart.js ---------- */
@@ -580,12 +640,52 @@ function decimateSeries(points, timeField, valueFields, maxPoints) {
             const values = chunk
                 .map((p) => p[field])
                 .filter((v) => v !== undefined && v !== null && !Number.isNaN(v));
+            // Arrondi à 2 décimales : sans cela, la division en JS introduit
+            // un bruit de dernière décimale binaire (ex. 6.2 devient
+            // 6.200000000000001 sur certains paquets et reste 6.2 sur
+            // d'autres) qui n'a aucun sens physique (aucun capteur simulé
+            // n'a cette précision) et force l'échelle Y de Chart.js à
+            // zoomer sur cet écart infinitésimal — symptôme observé par
+            // l'utilisateur sur la courbe de pression pneumatique, dont la
+            // valeur brute est pourtant parfaitement constante (6.2 bar).
             bucket[field] = values.length
-                ? values.reduce((a, b) => a + b, 0) / values.length
+                ? Math.round((values.reduce((a, b) => a + b, 0) / values.length) * 100) / 100
                 : null;
         }
         bucket[timeField] = chunk[Math.floor(chunk.length / 2)][timeField];
         result.push(bucket);
     }
     return result;
+}
+
+/* ---------- Export CSV (partagé entre data_comparison.html,
+   fault_history.html et maintenance_history.html) ---------- */
+
+function toCsvValue(v) {
+    if (v === null || v === undefined) return '';
+    const s = String(v);
+    if (/[",;\n]/.test(s)) return '"' + s.replace(/"/g, '""') + '"';
+    return s;
+}
+
+/**
+ * Déclenche le téléchargement d'un CSV construit à partir d'une ligne
+ * d'en-tête et d'un tableau de lignes. Ajoute un BOM UTF-8 : Excel (FR)
+ * n'auto-détecte pas l'encodage sans lui et afficherait les accents des
+ * en-têtes de colonnes de travers. Déjà utilisé par data_comparison.html
+ * (export par cellule), promu ici pour être réutilisé par les pages
+ * d'historique (pannes, maintenance).
+ */
+function downloadCsv(filename, headerRow, rows) {
+    const lines = [headerRow, ...rows].map((row) => row.map(toCsvValue).join(','));
+    const csvContent = String.fromCharCode(0xFEFF) + lines.join('\r\n');
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
 }

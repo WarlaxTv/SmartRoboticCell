@@ -48,6 +48,7 @@
                 <input type="date" id="until-filter" class="filter-input" onchange="fetchFaults()">
             </div>
             <button class="btn btn-reset" id="filter-reset-btn" onclick="resetFilters()">Réinitialiser</button>
+            <button class="btn hidden" id="download-csv-btn" onclick="downloadFaultsCsv()">Télécharger CSV</button>
         </div>
 
         <div class="history-panel">
@@ -116,6 +117,13 @@
                 interventionSubmit: "Valider",
                 interventionSuccess: "Intervention enregistrée.",
                 interventionError: "Impossible d'enregistrer l'intervention.",
+                downloadBtn: "Télécharger CSV",
+                csvTime: "Horodatage",
+                csvCell: "Cellule",
+                csvType: "Type",
+                csvSeverity: "Gravité",
+                csvDescription: "Description",
+                csvStatus: "Statut",
             },
             en: {
                 pageTitle: "Fault History",
@@ -141,6 +149,13 @@
                 interventionSubmit: "Submit",
                 interventionSuccess: "Intervention recorded.",
                 interventionError: "Could not record the intervention.",
+                downloadBtn: "Download CSV",
+                csvTime: "Timestamp",
+                csvCell: "Cell",
+                csvType: "Type",
+                csvSeverity: "Severity",
+                csvDescription: "Description",
+                csvStatus: "Status",
             },
         };
 
@@ -168,6 +183,7 @@
             document.getElementById('filter-since-label').innerText = t('sinceFilterLabel');
             document.getElementById('filter-until-label').innerText = t('untilFilterLabel');
             document.getElementById('filter-reset-btn').innerText = t('resetFilters');
+            document.getElementById('download-csv-btn').innerText = t('downloadBtn');
             document.getElementById('cell-filter').options[0].innerText = t('allCells');
             document.getElementById('status-filter').options[0].innerText = t('allStatuses');
             document.getElementById('status-filter').options[1].innerText = t('statusActif');
@@ -234,6 +250,12 @@
             </div>`;
         }
 
+        // Dernière liste chargée (déjà filtrée côté serveur selon les
+        // filtres actifs), réutilisée par le téléchargement CSV sans refaire
+        // d'appel réseau — même principe que lastLoadedData sur la page
+        // Données par cellule.
+        let lastFaults = [];
+
         async function fetchFaults() {
             try {
                 const response = await fetch(`/api/faults/history${buildFaultsQuery()}`, {
@@ -241,6 +263,7 @@
                 });
                 const data = await response.json();
                 if (data.status === 'ok') {
+                    lastFaults = data.faults;
                     const container = document.getElementById('faults-content');
                     if (data.faults.length === 0) {
                         container.innerHTML = t('noFaults');
@@ -249,6 +272,23 @@
                     }
                 }
             } catch (e) { console.error(e); }
+        }
+
+        // Téléchargement CSV de l'historique des défauts actuellement
+        // affiché (respecte les filtres cellule/statut/dates en cours),
+        // réservé à la Maintenance/Admin comme les autres téléchargements
+        // du site (cf. downloadCsv() partagée dans common.js).
+        function downloadFaultsCsv() {
+            const header = [t('csvTime'), t('csvCell'), t('csvType'), t('csvSeverity'), t('csvDescription'), t('csvStatus')];
+            const rows = lastFaults.map((f) => [
+                f.time,
+                cellDisplayName(f.cell_id),
+                translateFaultText(f.type),
+                f.severity,
+                translateFaultText(f.description),
+                statusLabel(f.fault_status),
+            ]);
+            downloadCsv('historique_pannes.csv', header, rows);
         }
 
         function openInterventionModal(defautId) {
@@ -305,6 +345,11 @@
                 await loadCellNames();
                 populateCellFilterOptions();
                 applyLanguage();
+                // Téléchargement réservé à la Maintenance/Admin, comme les
+                // autres exports du site (cf. data_comparison.html).
+                if (hasMaintenanceRights(currentRole)) {
+                    document.getElementById('download-csv-btn').classList.remove('hidden');
+                }
                 document.getElementById('page-content').classList.remove('hidden');
                 fetchFaults();
                 setInterval(fetchFaults, 5000);

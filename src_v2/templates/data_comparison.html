@@ -76,8 +76,8 @@
                 periodLabel: "Période :",
                 rangeDay: "24 heures", rangeWeek: "7 jours", rangeMonth: "30 jours",
                 titleTemp: "Température par axe (°C)",
-                titleCourant: "Courant moyen des axes (A)",
-                titleCouple: "Couple moyen des axes (N·m)",
+                titleCourant: "Courant par axe (A)",
+                titleCouple: "Couple par axe (N·m)",
                 titlePressure: "Pression pneumatique (bar)",
                 titleLubrix: "Niveau lubrifiant (%)",
                 axisWord: "Axe",
@@ -100,8 +100,8 @@
                 periodLabel: "Period:",
                 rangeDay: "24 hours", rangeWeek: "7 days", rangeMonth: "30 days",
                 titleTemp: "Temperature per axis (°C)",
-                titleCourant: "Average axis current (A)",
-                titleCouple: "Average axis torque (N·m)",
+                titleCourant: "Current per axis (A)",
+                titleCouple: "Torque per axis (N·m)",
                 titlePressure: "Pneumatic pressure (bar)",
                 titleLubrix: "Lubricant level (%)",
                 axisWord: "Axis",
@@ -180,38 +180,18 @@
             }
         }
 
-        // Les relevés par axe sont détaillés (6 axes) ; pour comparer les 3
-        // cellules entre elles sans surcharger les courbes de 18 lignes, on
-        // calcule ici une moyenne par cellule et par horodatage (calcul
-        // effectué côté client, à partir des mêmes relevés que la page de
-        // détail d'une cellule).
-        function averageAxesByTime(axisMeasures) {
-            const byTime = {};
-            for (const m of axisMeasures) {
-                if (!byTime[m.time]) byTime[m.time] = { temp: [], courant: [], couple: [] };
-                byTime[m.time].temp.push(m.temperature_c);
-                byTime[m.time].courant.push(m.courant_a);
-                byTime[m.time].couple.push(m.couple_nm);
-            }
-            const avg = (arr) => arr.reduce((a, b) => a + b, 0) / arr.length;
-            return Object.keys(byTime).sort().map((time) => ({
-                time,
-                temperature_c: avg(byTime[time].temp),
-                courant_a: avg(byTime[time].courant),
-                couple_nm: avg(byTime[time].couple),
-            }));
-        }
-
-        // Température : un jeu de données par axe (6 lignes), PAS moyennée
-        // entre les axes — cf. demande utilisateur ("pour la température des
-        // axes, il faut que ce soit chaque axe séparément"). Toujours les 6
+        // Un jeu de données par axe (6 lignes), PAS moyenné entre les axes —
+        // cf. demande utilisateur ("pour la température des axes, il faut
+        // que ce soit chaque axe séparément", étendue ensuite à "je veux que
+        // la consommation et le couple soient également par axe"). `field`
+        // vaut 'temperature_c', 'courant_a' ou 'couple_nm'. Toujours les 6
         // axes (cette page n'a pas de sélecteur d'axes comme cell_detail.html).
         // Retourne { datasets, labels } : les 6 axes sont écrits en base par
         // des INSERT distincts au même tick et peuvent différer d'1s l'un de
         // l'autre à l'occasion, d'où la liste de catégories fusionnée et
         // triée explicite (même raison que buildAxisDatasets dans
         // cell_detail.html, cf. CHG-V2-086).
-        function buildTempDatasetsForCell(axisMeasures) {
+        function buildAxisDatasetsForCell(axisMeasures, field) {
             const byAxis = {};
             for (const m of axisMeasures) {
                 if (!byAxis[m.axe]) byAxis[m.axe] = [];
@@ -219,12 +199,12 @@
             }
             const decimatedByAxis = {};
             for (const axe of Object.keys(byAxis)) {
-                decimatedByAxis[axe] = decimateSeries(byAxis[axe], 'time', ['temperature_c'], CHART_MAX_POINTS);
+                decimatedByAxis[axe] = decimateSeries(byAxis[axe], 'time', [field], CHART_MAX_POINTS);
             }
             const labels = mergedSortedTimes(Object.values(decimatedByAxis));
             const datasets = Object.keys(byAxis).sort((a, b) => a - b).map((axe) => ({
                 label: `${t('axisWord')} ${axe}`,
-                data: decimatedByAxis[axe].map((m) => ({ x: m.time, y: m.temperature_c })),
+                data: decimatedByAxis[axe].map((m) => ({ x: m.time, y: m[field] })),
                 borderColor: AXIS_COLORS[(axe - 1) % AXIS_COLORS.length],
                 backgroundColor: 'transparent',
                 tension: 0.25,
@@ -301,10 +281,11 @@
         function lineChart(canvasId, labels, datasets, yLabel) {
             if (charts[canvasId]) charts[canvasId].destroy();
             // labels omis (undefined) sur les graphiques à un seul jeu de
-            // données (courant/couple/pression/lubrifiant par cellule) :
-            // Chart.js retrouve alors son comportement par défaut, toujours
-            // correct pour une série unique. Fourni explicitement pour la
-            // température par axe (plusieurs séries, cf. buildTempDatasetsForCell).
+            // données (pression/lubrifiant par cellule) : Chart.js retrouve
+            // alors son comportement par défaut, toujours correct pour une
+            // série unique. Fourni explicitement pour les courbes par axe
+            // (température/courant/couple, plusieurs séries chacune, cf.
+            // buildAxisDatasetsForCell).
             const data = labels ? { labels, datasets } : { datasets };
             charts[canvasId] = new Chart(document.getElementById(canvasId), {
                 type: 'line',
@@ -367,29 +348,26 @@
                 const data = perCell[i];
                 const color = CELL_COLORS[i % CELL_COLORS.length];
 
-                const tempResult = buildTempDatasetsForCell(data.axis_measures);
-                const avg = decimateSeries(
-                    averageAxesByTime(data.axis_measures), 'time', ['courant_a', 'couple_nm'], CHART_MAX_POINTS
-                );
+                const tempResult = buildAxisDatasetsForCell(data.axis_measures, 'temperature_c');
+                const courantResult = buildAxisDatasetsForCell(data.axis_measures, 'courant_a');
+                const coupleResult = buildAxisDatasetsForCell(data.axis_measures, 'couple_nm');
                 const cellMeasures = decimateSeries(
                     data.cell_measures, 'time', ['pneumatic_pressure_bar', 'lubrix_level_pct'], CHART_MAX_POINTS
                 );
 
-                const courantSet = [{ label: t('titleCourant'), data: avg.map((m) => ({ x: m.time, y: m.courant_a })), borderColor: color, backgroundColor: 'transparent', tension: 0.25, pointRadius: 0 }];
-                const coupleSet = [{ label: t('titleCouple'), data: avg.map((m) => ({ x: m.time, y: m.couple_nm })), borderColor: color, backgroundColor: 'transparent', tension: 0.25, pointRadius: 0 }];
                 const pressureSet = [{ label: t('titlePressure'), data: cellMeasures.map((m) => ({ x: m.time, y: m.pneumatic_pressure_bar })), borderColor: color, backgroundColor: 'transparent', tension: 0.25, pointRadius: 0 }];
                 const lubrixSet = [{ label: t('titleLubrix'), data: cellMeasures.map((m) => ({ x: m.time, y: m.lubrix_level_pct })), borderColor: color, backgroundColor: 'transparent', tension: 0.25, pointRadius: 0 }];
 
                 lineChart(`chart-temp-${cellId}`, tempResult.labels, tempResult.datasets, '°C');
-                lineChart(`chart-courant-${cellId}`, undefined, courantSet, 'A');
-                lineChart(`chart-couple-${cellId}`, undefined, coupleSet, 'N·m');
+                lineChart(`chart-courant-${cellId}`, courantResult.labels, courantResult.datasets, 'A');
+                lineChart(`chart-couple-${cellId}`, coupleResult.labels, coupleResult.datasets, 'N·m');
                 lineChart(`chart-pressure-${cellId}`, undefined, pressureSet, 'bar');
                 lineChart(`chart-lubrix-${cellId}`, undefined, lubrixSet, '%');
 
                 const titleFor = (base) => `${base} — ${cellDisplayName(cellId)}`;
                 chartRegistry[`temp-${cellId}`] = { title: titleFor(t('titleTemp')), datasets: tempResult.datasets, labels: tempResult.labels, yLabel: '°C' };
-                chartRegistry[`courant-${cellId}`] = { title: titleFor(t('titleCourant')), datasets: courantSet, yLabel: 'A' };
-                chartRegistry[`couple-${cellId}`] = { title: titleFor(t('titleCouple')), datasets: coupleSet, yLabel: 'N·m' };
+                chartRegistry[`courant-${cellId}`] = { title: titleFor(t('titleCourant')), datasets: courantResult.datasets, labels: courantResult.labels, yLabel: 'A' };
+                chartRegistry[`couple-${cellId}`] = { title: titleFor(t('titleCouple')), datasets: coupleResult.datasets, labels: coupleResult.labels, yLabel: 'N·m' };
                 chartRegistry[`pressure-${cellId}`] = { title: titleFor(t('titlePressure')), datasets: pressureSet, yLabel: 'bar' };
                 chartRegistry[`lubrix-${cellId}`] = { title: titleFor(t('titleLubrix')), datasets: lubrixSet, yLabel: '%' };
             });
@@ -398,30 +376,10 @@
             renderDownloadTab();
         }
 
-        /* ---------- Export CSV (onglet "Télécharger") ---------- */
-
-        function toCsvValue(v) {
-            if (v === null || v === undefined) return '';
-            const s = String(v);
-            if (/[",;\n]/.test(s)) return '"' + s.replace(/"/g, '""') + '"';
-            return s;
-        }
-
-        function downloadCsv(filename, headerRow, rows) {
-            const lines = [headerRow, ...rows].map((row) => row.map(toCsvValue).join(','));
-            // BOM UTF-8 : Excel (FR) n'auto-détecte pas l'encodage sans lui et
-            // afficherait les accents des en-têtes de colonnes de travers.
-            const csvContent = String.fromCharCode(0xFEFF) + lines.join('\r\n');
-            const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
-            const url = URL.createObjectURL(blob);
-            const a = document.createElement('a');
-            a.href = url;
-            a.download = filename;
-            document.body.appendChild(a);
-            a.click();
-            document.body.removeChild(a);
-            URL.revokeObjectURL(url);
-        }
+        /* ---------- Export CSV (onglet "Télécharger") ----------
+           toCsvValue()/downloadCsv() sont désormais partagées dans
+           common.js (utilisées aussi par fault_history.html et
+           maintenance_history.html). */
 
         // Export CSV cellule par cellule, format "large" (une ligne par
         // horodatage, une colonne par mesure) plutôt que le format

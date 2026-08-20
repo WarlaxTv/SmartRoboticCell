@@ -93,6 +93,7 @@
                 level: "Niveau :",
                 issueBadgeCritical: "Alerte critique",
                 issueBadgeWarning: "Anomalie signalée",
+                issueBadgeRequest: "Intervention demandée",
                 sslValid: "SÉCURITÉ SSL : CERTIFICAT VALIDE (Expire : {date})",
                 sslUnknown: "SÉCURITÉ SSL : certificat introuvable côté serveur",
                 cellDetailLink: "Voir le détail &rarr;",
@@ -149,6 +150,7 @@
                 level: "Level:",
                 issueBadgeCritical: "Critical alert",
                 issueBadgeWarning: "Reported issue",
+                issueBadgeRequest: "Intervention requested",
                 sslValid: "SSL SECURITY: VALID CERTIFICATE (Expires: {date})",
                 sslUnknown: "SSL SECURITY: certificate not found server-side",
                 cellDetailLink: "View detail &rarr;",
@@ -406,7 +408,22 @@
                             const badgeLabel = isCriticalIssue ? t('issueBadgeCritical') : t('issueBadgeWarning');
                             issueBadgeHtml = `<span style="background:${badgeColor}; color:#fff; border-radius: 10px; padding: 3px 10px; font-size: 0.75em; font-weight:bold; white-space:nowrap;">&#9888; ${badgeLabel} (${issueInfo.count})</span>`;
                         }
-                        
+
+                        // Badge visible sur la carte, à côté de l'IP, pour l'Opérateur
+                        // ET la Maintenance, lorsqu'une demande d'intervention générique
+                        // (bouton "Demander une intervention" côté Opérateur, cf.
+                        // /api/maintenance/request) est active sur cette cellule. Avant ce
+                        // correctif, seule la bannière du haut (réservée à la Maintenance,
+                        // cf. maintAlerts plus bas) et un texte de confirmation pour
+                        // l'Opérateur signalaient la demande — aucune alerte visible sur la
+                        // carte elle-même, pour l'un ou l'autre rôle (cf. demande
+                        // utilisateur : "il n'y a pas d'alerte qui apparait sur le
+                        // dashboard à côté de l'ip pour l'opérateur ni la maintenance").
+                        let reqBadgeHtml = '';
+                        if (data.maint_requests[cell.id]) {
+                            reqBadgeHtml = `<span style="background:#5E5CE6; color:#fff; border-radius: 10px; padding: 3px 10px; font-size: 0.75em; font-weight:bold; white-space:nowrap;">&#9888; ${t('issueBadgeRequest')}</span>`;
+                        }
+
                         // Bouton d'appel maintenance (visible que pour l'opérateur), toujours
                         // disponible désormais — l'opérateur doit pouvoir signaler un problème
                         // qu'il constate lui-même, même si les seuils automatiques (temps avant
@@ -451,18 +468,21 @@
                             sslHtml = t('sslUnknown');
                         }
 
+                        // Lien vers la vue détaillée (courbes par axe) : ouvert à
+                        // l'Opérateur également (cf. demande utilisateur "je
+                        // souhaite que l'opérateur puisse avoir accès à la vue
+                        // détaillée de chaque cellule") — /cell/{id} et ses
+                        // endpoints /api/cell/{id}/axes et /measures acceptaient
+                        // déjà OPERATEUR côté serveur (require_role("MAINTENANCE",
+                        // "OPERATEUR")), seul ce lien sur le dashboard le limitait
+                        // par erreur à hasMaintenanceRights().
+                        const diagHtml = `
+                            <a href="/cell/${cell.id}" class="btn" style="background:#0071E3; display:inline-block; margin-top:10px; padding: 5px 10px; font-size: 0.8em;">${t('cellDetailLink')}</a>
+                        `;
+
                         // Boutons d'action pour la Maintenance directement sur la carte
                         let maintActionHtml = '';
-                        let diagHtml = '';
                         if (hasMaintenanceRights(currentRole)) {
-                            // Le détail par axe (température/vibration) est réservé à
-                            // la page /cell/{id} : sur la vue principale, une carte par
-                            // cellule ne doit garder que l'essentiel (statut, alarmes,
-                            // maintenance) pour rester lisible.
-                            diagHtml = `
-                                <a href="/cell/${cell.id}" class="btn" style="background:#0071E3; display:inline-block; margin-top:10px; padding: 5px 10px; font-size: 0.8em;">${t('cellDetailLink')}</a>
-                            `;
-
                             maintActionHtml = `<div style="margin-top: 15px; display:flex; gap: 10px;">`;
                             if (maintDue) {
                                 maintActionHtml += `<button class="btn" style="background:#5E5CE6; padding: 5px 10px; font-size: 0.8em;" onclick="simuAction(${cell.id}, 'ack_maint')">${t('maintenanceCompleted')}</button>`;
@@ -476,7 +496,7 @@
                         card.innerHTML = `
                             <div style="font-family: monospace; border-bottom: 1px dashed #bdc3c7; padding-bottom: 10px; margin-bottom: 10px; display: flex; justify-content: space-between; align-items:center;">
                                 <strong>${t('cellLabel')} #${cell.id}: ${cell.name} (IP: ${cell.ip})</strong>
-                                ${issueBadgeHtml}
+                                <div style="display:flex; gap:6px; align-items:center;">${issueBadgeHtml}${reqBadgeHtml}</div>
                             </div>
 
                             <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 10px; font-size: 0.9em; margin-bottom: 15px;">

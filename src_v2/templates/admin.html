@@ -109,6 +109,18 @@
                 cellCreateMissing: "Nom, type de robot et adresse IP requis.",
                 cellCreateSuccess: "Cellule créée. Redémarrez le simulateur OPC UA pour l'activer.",
                 cellCreateError: "Erreur lors de la création de la cellule.",
+                roleChangeSuccess: "Rôle mis à jour.",
+                roleChangeError: "Erreur lors du changement de rôle.",
+                editBtn: "Modifier",
+                deleteBtn: "Supprimer",
+                saveBtn: "Enregistrer",
+                cancelBtn: "Annuler",
+                cellUpdateSuccess: "Cellule modifiée. Redémarrez le simulateur OPC UA pour appliquer le changement.",
+                cellUpdateError: "Erreur lors de la modification de la cellule.",
+                cellDeleteConfirmTitle: "Supprimer la cellule",
+                cellDeleteConfirmBody: "Supprimer cette cellule ? L'historique déjà enregistré (mesures, défauts, interventions) est conservé, mais la cellule disparaîtra du dashboard après redémarrage du simulateur OPC UA.",
+                cellDeleteSuccess: "Cellule supprimée. Redémarrez le simulateur OPC UA pour appliquer le changement.",
+                cellDeleteError: "Erreur lors de la suppression de la cellule.",
             },
             en: {
                 pageTitle: "Administration",
@@ -135,6 +147,18 @@
                 cellCreateMissing: "Name, robot type and IP address required.",
                 cellCreateSuccess: "Cell created. Restart the OPC UA simulator to activate it.",
                 cellCreateError: "Error while creating the cell.",
+                roleChangeSuccess: "Role updated.",
+                roleChangeError: "Error while changing the role.",
+                editBtn: "Edit",
+                deleteBtn: "Delete",
+                saveBtn: "Save",
+                cancelBtn: "Cancel",
+                cellUpdateSuccess: "Cell updated. Restart the OPC UA simulator to apply the change.",
+                cellUpdateError: "Error while updating the cell.",
+                cellDeleteConfirmTitle: "Delete cell",
+                cellDeleteConfirmBody: "Delete this cell? Already-recorded history (measures, faults, interventions) is kept, but the cell will disappear from the dashboard after the OPC UA simulator is restarted.",
+                cellDeleteSuccess: "Cell deleted. Restart the OPC UA simulator to apply the change.",
+                cellDeleteError: "Error while deleting the cell.",
             },
         };
 
@@ -170,6 +194,14 @@
             renderTopNav('admin', currentRole);
         }
 
+        // Id de la cellule actuellement en édition inline (un seul formulaire
+        // ouvert à la fois), ou null si aucun.
+        let editingCellId = null;
+        // Dernière liste de cellules chargée (id/nom/type_robot/adresse_ip),
+        // réutilisée pour pré-remplir le formulaire d'édition sans refaire
+        // d'appel réseau à l'ouverture.
+        let lastCells = [];
+
         async function fetchUsers() {
             try {
                 const response = await fetch('/api/admin/users', {
@@ -181,10 +213,69 @@
                     container.innerHTML = t('noUsers');
                     return;
                 }
-                container.innerHTML = data.users.map((u) =>
-                    `<div class="admin-list-item"><span>${u.username}</span><span class="admin-role-badge">${u.role}</span></div>`
-                ).join('');
+                // Le rôle d'un compte ADMIN n'est pas modifiable ici (cf.
+                // db.update_user_role) : badge simple pour lui, menu
+                // déroulant pour les autres, appliqué immédiatement au
+                // changement (pas de bouton "Enregistrer" séparé, cohérent
+                // avec la simplicité d'un simple changement de rôle).
+                container.innerHTML = data.users.map((u) => {
+                    if (u.role === 'ADMIN') {
+                        return `<div class="admin-list-item"><span>${u.username}</span><span class="admin-role-badge">${u.role}</span></div>`;
+                    }
+                    return `<div class="admin-list-item">
+                        <span>${u.username}</span>
+                        <select onchange="changeUserRole('${u.username}', this.value)">
+                            <option value="OPERATEUR" ${u.role === 'OPERATEUR' ? 'selected' : ''}>${t('roleOperateur')}</option>
+                            <option value="MAINTENANCE" ${u.role === 'MAINTENANCE' ? 'selected' : ''}>${t('roleMaintenance')}</option>
+                        </select>
+                    </div>`;
+                }).join('');
             } catch (e) { console.error(e); }
+        }
+
+        async function changeUserRole(username, newRole) {
+            try {
+                const response = await fetch(`/api/admin/users/${encodeURIComponent(username)}`, {
+                    method: 'PATCH',
+                    headers: {
+                        Authorization: `Bearer ${token}`,
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({ role: newRole }),
+                });
+                if (response.ok) {
+                    showModal(t('roleChangeSuccess'), 'success');
+                } else {
+                    const err = await response.json().catch(() => ({}));
+                    showModal(err.detail || t('roleChangeError'), 'error');
+                    fetchUsers(); // remet le menu à jour si le changement a échoué
+                }
+            } catch (e) {
+                console.error(e);
+                showModal(t('roleChangeError'), 'error');
+                fetchUsers();
+            }
+        }
+
+        function cellRowHtml(c) {
+            if (editingCellId === c.id) {
+                return `<div class="admin-list-item admin-list-item-editing">
+                    <div class="form-field"><label>${t('cellNomLabel')}</label><input type="text" id="edit-cell-nom-${c.id}" value="${c.nom}"></div>
+                    <div class="form-field"><label>${t('cellTypeLabel')}</label><input type="text" id="edit-cell-type-${c.id}" value="${c.type_robot}"></div>
+                    <div class="form-field"><label>${t('cellIpLabel')}</label><input type="text" id="edit-cell-ip-${c.id}" value="${c.adresse_ip}"></div>
+                    <div style="display:flex; gap:8px;">
+                        <button class="btn" onclick="saveCellEdit(${c.id})">${t('saveBtn')}</button>
+                        <button class="btn btn-reset" onclick="cancelCellEdit()">${t('cancelBtn')}</button>
+                    </div>
+                </div>`;
+            }
+            return `<div class="admin-list-item">
+                <span>#${c.id} — ${c.nom} (${c.type_robot}, ${c.adresse_ip})</span>
+                <div style="display:flex; gap:8px;">
+                    <button class="btn btn-reset" onclick="startCellEdit(${c.id})">${t('editBtn')}</button>
+                    <button class="btn btn-reset" onclick="confirmDeleteCell(${c.id})">${t('deleteBtn')}</button>
+                </div>
+            </div>`;
         }
 
         async function fetchCells() {
@@ -195,13 +286,79 @@
                 const data = await response.json();
                 const container = document.getElementById('cells-list');
                 if (data.status !== 'ok' || data.cells.length === 0) {
+                    lastCells = [];
                     container.innerHTML = t('noCells');
                     return;
                 }
-                container.innerHTML = data.cells.map((c) =>
-                    `<div class="admin-list-item"><span>#${c.id} — ${c.nom}</span></div>`
-                ).join('');
+                lastCells = data.cells;
+                container.innerHTML = data.cells.map(cellRowHtml).join('');
             } catch (e) { console.error(e); }
+        }
+
+        function startCellEdit(cellId) {
+            editingCellId = cellId;
+            fetchCells();
+        }
+
+        function cancelCellEdit() {
+            editingCellId = null;
+            fetchCells();
+        }
+
+        async function saveCellEdit(cellId) {
+            const nom = document.getElementById(`edit-cell-nom-${cellId}`).value.trim();
+            const type_robot = document.getElementById(`edit-cell-type-${cellId}`).value.trim();
+            const adresse_ip = document.getElementById(`edit-cell-ip-${cellId}`).value.trim();
+            if (!nom || !type_robot || !adresse_ip) {
+                showModal(t('cellCreateMissing'), 'error');
+                return;
+            }
+            try {
+                const response = await fetch(`/api/admin/cells/${cellId}`, {
+                    method: 'PATCH',
+                    headers: {
+                        Authorization: `Bearer ${token}`,
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({ nom, type_robot, adresse_ip }),
+                });
+                if (response.ok) {
+                    editingCellId = null;
+                    showModal(t('cellUpdateSuccess'), 'success');
+                    fetchCells();
+                    loadCellNames(); // rafraîchit CELL_NAMES/CELL_LIST partagés
+                } else {
+                    const err = await response.json().catch(() => ({}));
+                    showModal(err.detail || t('cellUpdateError'), 'error');
+                }
+            } catch (e) {
+                console.error(e);
+                showModal(t('cellUpdateError'), 'error');
+            }
+        }
+
+        function confirmDeleteCell(cellId) {
+            openConfirmModal(t('cellDeleteConfirmTitle'), t('cellDeleteConfirmBody'), () => deleteCell(cellId));
+        }
+
+        async function deleteCell(cellId) {
+            try {
+                const response = await fetch(`/api/admin/cells/${cellId}`, {
+                    method: 'DELETE',
+                    headers: { Authorization: `Bearer ${token}` },
+                });
+                if (response.ok) {
+                    showModal(t('cellDeleteSuccess'), 'success');
+                    fetchCells();
+                    loadCellNames();
+                } else {
+                    const err = await response.json().catch(() => ({}));
+                    showModal(err.detail || t('cellDeleteError'), 'error');
+                }
+            } catch (e) {
+                console.error(e);
+                showModal(t('cellDeleteError'), 'error');
+            }
         }
 
         function fetchAll() {
