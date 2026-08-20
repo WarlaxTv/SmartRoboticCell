@@ -141,13 +141,16 @@ function renderTopNav(activePage, role) {
 
     const links = [link('main', '/', navT('navMainView'))];
     // Historique maintenance/défauts : accessible en lecture à l'Opérateur
-    // aussi (ses propres demandes + tous les défauts, cf. CHG-V2-066) ;
-    // Données (export CSV inclus) reste réservé à la Maintenance.
+    // aussi (ses propres demandes + tous les défauts, cf. CHG-V2-066).
+    // Données (courbes de comparaison) ouvert en lecture à l'Opérateur
+    // également (cf. décision utilisateur round 6 : "la seule chose que
+    // l'opérateur ne peut pas faire c'est créer des alertes, ni télécharger
+    // les graphs" — l'onglet Courbes reste donc visible, seul le
+    // téléchargement (CSV/image) est réservé à la Maintenance, cf.
+    // data_comparison.html).
     if (isMaint || isOperator) {
         links.push(link('maint-history', '/historique-maintenance', navT('navMaintHistory')));
         links.push(link('fault-history', '/historique-pannes', navT('navFaultHistory')));
-    }
-    if (isMaint) {
         links.push(link('data', '/donnees', navT('navData')));
     }
 
@@ -406,3 +409,35 @@ function closeChartZoom() {
 document.addEventListener('keydown', (evt) => {
     if (evt.key === 'Escape') closeChartZoom();
 });
+
+/**
+ * Télécharge une image PNG d'un graphique Chart.js (cf. demande utilisateur
+ * round 6 : "pour les courbes j'aimerais que l'on puisse télécharger une
+ * image de la courbe"). Réutilisé par cell_detail.html et
+ * data_comparison.html. Réservé au rôle MAINTENANCE côté appelant (comme le
+ * reste des téléchargements) : "la seule chose que l'opérateur ne peut pas
+ * faire c'est créer des alertes, ni télécharger les graphs".
+ */
+function downloadChartAsImage(chart, filename) {
+    if (!chart) return;
+    // Fond blanc explicite : Chart.js dessine sur un canvas transparent par
+    // défaut, ce qui produirait un PNG illisible une fois collé dans un
+    // document ou imprimé sur fond blanc (les courbes/labels sombres se
+    // fondent). On compose donc l'image du graphique sur un canvas
+    // intermédiaire rempli de blanc avant export.
+    const sourceCanvas = chart.canvas;
+    const composite = document.createElement('canvas');
+    composite.width = sourceCanvas.width;
+    composite.height = sourceCanvas.height;
+    const ctx = composite.getContext('2d');
+    ctx.fillStyle = '#ffffff';
+    ctx.fillRect(0, 0, composite.width, composite.height);
+    ctx.drawImage(sourceCanvas, 0, 0);
+    const url = composite.toDataURL('image/png');
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+}

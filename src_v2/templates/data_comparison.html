@@ -52,33 +52,29 @@
 
             <div class="grid2">
                 <div class="card">
-                    <h2><span id="title-temp">Température moyenne des axes (°C)</span> <button type="button" class="chart-zoom-btn" onclick="zoomChart('temp')" title="Agrandir">⤢</button></h2>
+                    <h2><span id="title-temp">Température moyenne des axes (°C)</span> <span><button type="button" class="chart-zoom-btn chart-dl-btn" id="dl-btn-temp" onclick="downloadChart('temp')" title="Télécharger l'image">&#8681;</button><button type="button" class="chart-zoom-btn" onclick="zoomChart('temp')" title="Agrandir">⤢</button></span></h2>
                     <canvas id="chart-temp"></canvas>
                 </div>
                 <div class="card">
-                    <h2><span id="title-courant">Courant moyen des axes (A)</span> <button type="button" class="chart-zoom-btn" onclick="zoomChart('courant')" title="Agrandir">⤢</button></h2>
+                    <h2><span id="title-courant">Courant moyen des axes (A)</span> <span><button type="button" class="chart-zoom-btn chart-dl-btn" id="dl-btn-courant" onclick="downloadChart('courant')" title="Télécharger l'image">&#8681;</button><button type="button" class="chart-zoom-btn" onclick="zoomChart('courant')" title="Agrandir">⤢</button></span></h2>
                     <canvas id="chart-courant"></canvas>
                 </div>
                 <div class="card">
-                    <h2><span id="title-couple">Couple moyen des axes (N·m)</span> <button type="button" class="chart-zoom-btn" onclick="zoomChart('couple')" title="Agrandir">⤢</button></h2>
+                    <h2><span id="title-couple">Couple moyen des axes (N·m)</span> <span><button type="button" class="chart-zoom-btn chart-dl-btn" id="dl-btn-couple" onclick="downloadChart('couple')" title="Télécharger l'image">&#8681;</button><button type="button" class="chart-zoom-btn" onclick="zoomChart('couple')" title="Agrandir">⤢</button></span></h2>
                     <canvas id="chart-couple"></canvas>
                 </div>
                 <div class="card">
-                    <h2><span id="title-pressure">Pression pneumatique (bar)</span> <button type="button" class="chart-zoom-btn" onclick="zoomChart('pressure')" title="Agrandir">⤢</button></h2>
+                    <h2><span id="title-pressure">Pression pneumatique (bar)</span> <span><button type="button" class="chart-zoom-btn chart-dl-btn" id="dl-btn-pressure" onclick="downloadChart('pressure')" title="Télécharger l'image">&#8681;</button><button type="button" class="chart-zoom-btn" onclick="zoomChart('pressure')" title="Agrandir">⤢</button></span></h2>
                     <canvas id="chart-pressure"></canvas>
                 </div>
                 <div class="card">
-                    <h2><span id="title-lubrix">Niveau lubrifiant (%)</span> <button type="button" class="chart-zoom-btn" onclick="zoomChart('lubrix')" title="Agrandir">⤢</button></h2>
+                    <h2><span id="title-lubrix">Niveau lubrifiant (%)</span> <span><button type="button" class="chart-zoom-btn chart-dl-btn" id="dl-btn-lubrix" onclick="downloadChart('lubrix')" title="Télécharger l'image">&#8681;</button><button type="button" class="chart-zoom-btn" onclick="zoomChart('lubrix')" title="Agrandir">⤢</button></span></h2>
                     <canvas id="chart-lubrix"></canvas>
                 </div>
             </div>
         </div>
 
         <div id="tab-download" class="hidden">
-            <div class="card" style="margin-bottom:20px;">
-                <h2><span id="title-download-graphs">Télécharger par graphique (3 cellules)</span></h2>
-                <div id="download-graphs-list"></div>
-            </div>
             <div class="card">
                 <h2><span id="title-download-cells">Données brutes par cellule (tous les axes)</span></h2>
                 <div id="download-cells-list"></div>
@@ -101,12 +97,16 @@
                 titlePressure: "Pression pneumatique (bar)",
                 titleLubrix: "Niveau lubrifiant (%)",
                 cellLabel: "Cellule",
-                titleDownloadGraphs: "Télécharger par graphique (3 cellules)",
-                titleDownloadCells: "Données brutes par cellule (tous les axes)",
+                titleDownloadCells: "Données brutes par cellule",
                 downloadBtn: "Télécharger CSV",
                 csvTime: "Horodatage",
                 csvAxis: "Axe",
-                cellRawLabel: "toutes les données (axes)",
+                cellRawLabel: "toutes les données (6 axes, pression, lubrifiant)",
+                csvTempLabel: "Température (°C)",
+                csvCourantLabel: "Courant (A)",
+                csvCoupleLabel: "Couple (N·m)",
+                csvPressureLabel: "Pression pneumatique (bar)",
+                csvLubrixLabel: "Niveau lubrifiant (%)",
             },
             en: {
                 pageTitle: "Data — 3-cell comparison",
@@ -120,12 +120,16 @@
                 titlePressure: "Pneumatic pressure (bar)",
                 titleLubrix: "Lubricant level (%)",
                 cellLabel: "Cell",
-                titleDownloadGraphs: "Download by chart (3 cells)",
-                titleDownloadCells: "Raw data per cell (all axes)",
+                titleDownloadCells: "Raw data per cell",
                 downloadBtn: "Download CSV",
                 csvTime: "Timestamp",
                 csvAxis: "Axis",
-                cellRawLabel: "all data (axes)",
+                cellRawLabel: "all data (6 axes, pressure, lubricant)",
+                csvTempLabel: "Temperature (°C)",
+                csvCourantLabel: "Current (A)",
+                csvCoupleLabel: "Torque (N·m)",
+                csvPressureLabel: "Pneumatic pressure (bar)",
+                csvLubrixLabel: "Lubricant level (%)",
             },
         };
 
@@ -154,7 +158,6 @@
             document.getElementById('title-couple').innerText = t('titleCouple');
             document.getElementById('title-pressure').innerText = t('titlePressure');
             document.getElementById('title-lubrix').innerText = t('titleLubrix');
-            document.getElementById('title-download-graphs').innerText = t('titleDownloadGraphs');
             document.getElementById('title-download-cells').innerText = t('titleDownloadCells');
             document.getElementById('access-denied-title').innerText = navT('accessDeniedTitle');
             document.getElementById('access-denied-body').innerText = navT('accessDeniedBody');
@@ -272,6 +275,18 @@
             openChartZoom(entry.title, entry.datasets, options, entry.labels);
         }
 
+        // Téléchargement d'image de courbe (cf. downloadChartAsImage dans
+        // common.js), réservé à la Maintenance (bouton masqué pour
+        // l'Opérateur en bas de page, cf. RBAC round 6 : "ni télécharger les
+        // graphs"). `charts` est déjà indexé par id de canvas ("chart-temp",
+        // etc.), qui correspond exactement aux clés utilisées ici.
+        function downloadChart(key) {
+            const entry = chartRegistry[key];
+            if (!entry) return;
+            const safeTitle = entry.title.replace(/[^a-z0-9]+/gi, '_').toLowerCase();
+            downloadChartAsImage(charts[`chart-${key}`], `comparaison_3_cellules_${safeTitle}.png`);
+        }
+
         async function loadAll() {
             const hours = document.getElementById('range-select').value;
             const perCell = await Promise.all(CELLS.map((id) => fetchCellMeasures(id, hours)));
@@ -336,59 +351,57 @@
             URL.revokeObjectURL(url);
         }
 
-        function timeValueMap(items, valueField) {
-            const map = {};
-            for (const item of items) map[item.time] = item[valueField];
-            return map;
-        }
-
-        // Un CSV par graphique (les 3 cellules comparées, mêmes valeurs que
-        // celles tracées) : "chaque tableau de courbes" demandé par l'utilisateur.
-        const GRAPH_CSV_CONFIG = [
-            { key: 'temp', field: 'temperature_c', source: 'axis', filenamePart: 'temperature' },
-            { key: 'courant', field: 'courant_a', source: 'axis', filenamePart: 'courant' },
-            { key: 'couple', field: 'couple_nm', source: 'axis', filenamePart: 'couple' },
-            { key: 'pressure', field: 'pneumatic_pressure_bar', source: 'cell', filenamePart: 'pression' },
-            { key: 'lubrix', field: 'lubrix_level_pct', source: 'cell', filenamePart: 'lubrifiant' },
-        ];
-
-        function downloadGraphCsv(key) {
-            if (!lastLoadedData) return;
-            const cfg = GRAPH_CSV_CONFIG.find((c) => c.key === key);
-            if (!cfg) return;
-            const labels = cfg.source === 'axis' ? lastLoadedData.axisLabels : lastLoadedData.cellMeasureLabels;
-            const sourceArrays = cfg.source === 'axis'
-                ? lastLoadedData.avgPerCell
-                : lastLoadedData.perCell.map((d) => d.cell_measures);
-            const maps = sourceArrays.map((arr) => timeValueMap(arr, cfg.field));
-            const header = [t('csvTime'), ...CELLS.map((id) => `${t('cellLabel')} ${id}`)];
-            const rows = labels.map((time) => [time, ...maps.map((m) => (m[time] !== undefined ? m[time] : ''))]);
-            downloadCsv(`${cfg.filenamePart}_comparaison_3_cellules.csv`, header, rows);
-        }
-
-        // Un CSV par cellule avec les relevés bruts (non moyennés) des 6 axes :
-        // "des données pour chaque partie/cellule" demandé par l'utilisateur.
+        // Export CSV cellule par cellule, format "large" (une ligne par
+        // horodatage, une colonne par mesure) plutôt que le format
+        // "comparatif des 3 cellules" retiré à la demande de l'utilisateur
+        // round 6 ("je veux pouvoir télécharger cellule par cellule, pas un
+        // comparatif des 3"). Corrige aussi le problème de rendu signalé
+        // ("les téléchargements CSV rendent très mal niveau format") : la
+        // version précédente répétait 6 lignes par horodatage (une par axe)
+        // et omettait complètement la pression/le lubrifiant.
         function downloadCellCsv(cellId) {
             if (!lastLoadedData) return;
             const idx = CELLS.indexOf(cellId);
             const axisMeasures = lastLoadedData.perCell[idx].axis_measures;
-            const header = [t('csvTime'), t('csvAxis'), t('titleTemp'), t('titleCourant'), t('titleCouple')];
-            const rows = axisMeasures.map((m) => [m.time, m.axe, m.temperature_c, m.courant_a, m.couple_nm]);
-            downloadCsv(`cellule_${cellId}_donnees_axes.csv`, header, rows);
+            const cellMeasures = lastLoadedData.perCell[idx].cell_measures;
+
+            const axisByTime = {};
+            for (const m of axisMeasures) {
+                if (!axisByTime[m.time]) axisByTime[m.time] = {};
+                axisByTime[m.time][m.axe] = m;
+            }
+            const cellByTime = {};
+            for (const m of cellMeasures) cellByTime[m.time] = m;
+
+            const allTimes = mergedSortedTimes([axisMeasures, cellMeasures]);
+
+            const header = [t('csvTime')];
+            for (let axe = 1; axe <= 6; axe++) {
+                header.push(
+                    `${t('csvAxis')} ${axe} — ${t('csvTempLabel')}`,
+                    `${t('csvAxis')} ${axe} — ${t('csvCourantLabel')}`,
+                    `${t('csvAxis')} ${axe} — ${t('csvCoupleLabel')}`,
+                );
+            }
+            header.push(t('csvPressureLabel'), t('csvLubrixLabel'));
+
+            const rows = allTimes.map((time) => {
+                const row = [time];
+                for (let axe = 1; axe <= 6; axe++) {
+                    const m = axisByTime[time] && axisByTime[time][axe];
+                    row.push(m ? m.temperature_c : '', m ? m.courant_a : '', m ? m.couple_nm : '');
+                }
+                const cm = cellByTime[time];
+                row.push(cm ? cm.pneumatic_pressure_bar : '', cm ? cm.lubrix_level_pct : '');
+                return row;
+            });
+
+            downloadCsv(`cellule_${cellId}_donnees.csv`, header, rows);
         }
 
         function renderDownloadTab() {
-            const graphsContainer = document.getElementById('download-graphs-list');
             const cellsContainer = document.getElementById('download-cells-list');
-            if (!graphsContainer || !cellsContainer) return;
-
-            const graphTitles = {
-                temp: t('titleTemp'), courant: t('titleCourant'), couple: t('titleCouple'),
-                pressure: t('titlePressure'), lubrix: t('titleLubrix'),
-            };
-            graphsContainer.innerHTML = GRAPH_CSV_CONFIG.map((cfg) =>
-                `<div class="download-row"><span class="download-label">${graphTitles[cfg.key]}</span><button class="btn" onclick="downloadGraphCsv('${cfg.key}')">${t('downloadBtn')}</button></div>`
-            ).join('');
+            if (!cellsContainer) return;
 
             cellsContainer.innerHTML = CELLS.map((cellId) =>
                 `<div class="download-row"><span class="download-label">${cellDisplayName(cellId)} — ${t('cellRawLabel')}</span><button class="btn" onclick="downloadCellCsv(${cellId})">${t('downloadBtn')}</button></div>`
@@ -397,11 +410,20 @@
 
         if (!token) {
             window.location.href = '/';
-        } else if (currentRole !== 'MAINTENANCE') {
+        } else if (currentRole !== 'MAINTENANCE' && currentRole !== 'OPERATEUR') {
             applyLanguage();
             document.getElementById('access-denied').classList.remove('hidden');
         } else {
             applyLanguage();
+            // Courbes ouvertes en lecture à l'Opérateur (cf. décision
+            // utilisateur round 6), mais tout téléchargement (CSV ou image
+            // de courbe) reste réservé à la Maintenance : "la seule chose
+            // que l'opérateur ne peut pas faire c'est créer des alertes, ni
+            // télécharger les graphs".
+            if (currentRole !== 'MAINTENANCE') {
+                document.getElementById('tab-btn-download').classList.add('hidden');
+                document.querySelectorAll('.chart-dl-btn').forEach((el) => el.classList.add('hidden'));
+            }
             document.getElementById('page-content').classList.remove('hidden');
             loadAll();
         }

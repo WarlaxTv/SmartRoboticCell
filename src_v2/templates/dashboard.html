@@ -89,7 +89,10 @@
                 status: "Statut :",
                 error: "ERREUR :",
                 pneumatics: "PNEUMATIQUE",
+                pressureLabel: "Pression :",
                 level: "Niveau :",
+                issueBadgeCritical: "Alerte critique",
+                issueBadgeWarning: "Anomalie signalée",
                 sslValid: "SÉCURITÉ SSL : CERTIFICAT VALIDE (Expire : {date})",
                 sslUnknown: "SÉCURITÉ SSL : certificat introuvable côté serveur",
                 cellDetailLink: "Voir le détail &rarr;",
@@ -142,7 +145,10 @@
                 status: "Status:",
                 error: "ERROR:",
                 pneumatics: "PNEUMATICS",
+                pressureLabel: "Pressure:",
                 level: "Level:",
+                issueBadgeCritical: "Critical alert",
+                issueBadgeWarning: "Reported issue",
                 sslValid: "SSL SECURITY: VALID CERTIFICATE (Expires: {date})",
                 sslUnknown: "SSL SECURITY: certificate not found server-side",
                 cellDetailLink: "View detail &rarr;",
@@ -382,6 +388,24 @@
                         }
                         
                         let alarmsHtml = cell.alarms ? `<div class="alarms-box critical"><span class="dot" style="background:#FF3B30;"></span>${cell.alarms}</div>` : '';
+
+                        // Indicateur d'anomalie signalée par la Maintenance, visible
+                        // directement sur la carte (Maintenance ET Opérateur) sans avoir
+                        // à ouvrir la vue détaillée de la cellule (cf. demande utilisateur :
+                        // "avoir un indicateur pour qu'on sache si il y a une alerte de la
+                        // maintenance sur une cellule sans avoir à aller dans la vue
+                        // détaillée" / "si je déclenche une alerte ... l'opérateur ne peut
+                        // pas le savoir"). Une alerte critique met déjà la cellule en
+                        // défaut (carte rouge) ; ce badge couvre AUSSI les signalements de
+                        // sévérité "avertissement", invisibles autrement sur ce tableau.
+                        let issueBadgeHtml = '';
+                        const issueInfo = data.active_issues ? data.active_issues[cell.id] : null;
+                        if (issueInfo && issueInfo.count > 0) {
+                            const isCriticalIssue = issueInfo.max_severity === 'critique';
+                            const badgeColor = isCriticalIssue ? '#FF3B30' : '#FF9500';
+                            const badgeLabel = isCriticalIssue ? t('issueBadgeCritical') : t('issueBadgeWarning');
+                            issueBadgeHtml = `<span style="background:${badgeColor}; color:#fff; border-radius: 10px; padding: 3px 10px; font-size: 0.75em; font-weight:bold; white-space:nowrap;">&#9888; ${badgeLabel} (${issueInfo.count})</span>`;
+                        }
                         
                         // Bouton d'appel maintenance (visible que pour l'opérateur), toujours
                         // disponible désormais — l'opérateur doit pouvoir signaler un problème
@@ -450,29 +474,33 @@
                         }
 
                         card.innerHTML = `
-                            <div style="font-family: monospace; border-bottom: 1px dashed #bdc3c7; padding-bottom: 10px; margin-bottom: 10px; display: flex; justify-content: space-between;">
+                            <div style="font-family: monospace; border-bottom: 1px dashed #bdc3c7; padding-bottom: 10px; margin-bottom: 10px; display: flex; justify-content: space-between; align-items:center;">
                                 <strong>${t('cellLabel')} #${cell.id}: ${cell.name} (IP: ${cell.ip})</strong>
+                                ${issueBadgeHtml}
                             </div>
-                            
-                            <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 10px; font-family: monospace; font-size: 0.9em; margin-bottom: 15px;">
+
+                            <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 10px; font-size: 0.9em; margin-bottom: 15px;">
                                 <div>
                                     <div>${robotDot}${cell.type}</div>
-                                    <div style="padding-left: 25px; color: #6E6E73;">
-                                        ${t('status')} <span class="${statusClass}" style="font-weight:bold; font-family:inherit;">${cell.state}</span>
+                                    <div style="padding-left: 22px; color: #6E6E73;">
+                                        ${t('status')} <span class="${statusClass}" style="font-weight:bold;">${cell.state}</span>
                                         <br>${cell.fault && cell.alarms ? `<span style="color:#FF3B30;">${t('error')} ${cell.alarms}</span>` : ''}
                                     </div>
                                 </div>
                                 <div>
-                                    <div>${pneumDot}${t('pneumatics')} (${Number(cell.pneumatic_pressure).toFixed(1)} bar)</div>
+                                    <div>${pneumDot}${t('pneumatics')}</div>
+                                    <div style="padding-left: 22px; color: #6E6E73;">
+                                        ${t('pressureLabel')} ${Number(cell.pneumatic_pressure).toFixed(1)} bar
+                                    </div>
                                 </div>
                                 <div>
                                     <div>${lubrixDot}LUBRIX ${cell.lubrix_level > 20 ? 'OK' : 'LOW'}</div>
-                                    <div style="padding-left: 25px; color: #6E6E73;">
+                                    <div style="padding-left: 22px; color: #6E6E73;">
                                         ${t('level')} ${cell.lubrix_level}%
                                     </div>
                                 </div>
                             </div>
-                            
+
                             <div style="font-family: monospace; font-size: 0.85em; color: #6E6E73; margin-bottom: 15px;">
                                 ${sslHtml}
                             </div>

@@ -50,6 +50,49 @@ FAULT_TYPE_MANUAL = "Défaut déclenché manuellement (simulation)"
 MAINTENANCE_REPORTED_ISSUE_TYPE = "Anomalie signalée par la Maintenance"
 
 
+def _active_issues_by_cell(session: Session) -> dict[int, dict[str, object]]:
+    """Regroupe par cellule les défauts non résolus (compte + sévérité max).
+
+    Alimente le badge d'alerte affiché directement sur les cartes du
+    dashboard (Maintenance ET Opérateur), pour qu'une anomalie signalée par
+    la Maintenance — critique ou simple avertissement — soit visible sans
+    ouvrir la vue détaillée de la cellule (cf. demande utilisateur round 6).
+    """
+
+    issues: dict[int, dict[str, object]] = {}
+    for defaut in db.list_defauts(session):
+        if defaut.statut == db.DEFAUT_STATUT_RESOLU:
+            continue
+        entry = issues.setdefault(
+            defaut.cellule_id,
+            {"count": 0, "max_severity": db.DEFAUT_SEVERITE_AVERTISSEMENT},
+        )
+        entry["count"] += 1
+        if defaut.severite == db.DEFAUT_SEVERITE_CRITIQUE:
+            entry["max_severity"] = db.DEFAUT_SEVERITE_CRITIQUE
+    return issues
+
+
+def _has_active_manual_critical_issue(session: Session, cell_id: int) -> bool:
+    """Indique si une anomalie CRITIQUE signalée par la Maintenance (via
+    /api/maintenance/report-issue) est encore active sur cette cellule.
+
+    Utilisé pour distinguer un défaut OPC UA "réel" (signalé par la
+    Maintenance) d'un défaut simulé via le panneau POC (force_fault) : les
+    deux écrivent le même état OPC UA (cf. opcua_client._write_fault_state),
+    donc seule cette vérification en base permet de savoir si l'action
+    "Acquitter le défaut" du POC doit être bloquée (cf. CHG-V2 round 6 :
+    "je ne veux pas" que ce bouton lève une alerte critique de Maintenance).
+    """
+
+    return any(
+        f.type_defaut == MAINTENANCE_REPORTED_ISSUE_TYPE
+        and f.severite == db.DEFAUT_SEVERITE_CRITIQUE
+        and f.statut != db.DEFAUT_STATUT_RESOLU
+        for f in db.list_defauts(session, cellule_id=cell_id)
+    )
+
+
 def _load_ssl_cert_expiry() -> str | None:
     """Lit la date d'expiration réelle du certificat SSL du serveur.
 
@@ -220,7 +263,10 @@ async def login(
 
 
 @app.get("/api/status")
-async def get_status(current_user: dict = Depends(get_current_user)):
+async def get_status(
+    current_user: dict = Depends(get_current_user),
+    session: Session = Depends(get_session),
+):
     """API sécurisée renvoyant l'état des cellules depuis OPC UA"""
     data = await fetch_opcua_data()
     return {
@@ -228,6 +274,7 @@ async def get_status(current_user: dict = Depends(get_current_user)):
         "cells": data,
         "role": current_user["role"],
         "maint_requests": active_maintenance_requests,
+        "active_issues": _active_issues_by_cell(session),
         "ssl_cert_expiry": SSL_CERT_EXPIRY,
     }
 
@@ -235,12 +282,16 @@ async def get_status(current_user: dict = Depends(get_current_user)):
 @app.get("/api/cell/{cell_id}/axes")
 async def get_cell_axes(
     cell_id: int,
-    current_user: dict = Depends(require_role("MAINTENANCE")),
+    current_user: dict = Depends(require_role("MAINTENANCE", "OPERATEUR")),
 ):
     """Retourne l'état instantané des 6 axes moteurs d'une cellule.
 
-    Réservé au rôle MAINTENANCE, comme le reste des diagnostics avancés déjà
-    exposés uniquement à ce rôle sur le dashboard principal.
+    Ouvert en lecture à l'Opérateur (en plus de la Maintenance) : la vue
+    détaillée de la cellule (/cell/{id}) est désormais accessible aux deux
+    rôles (cf. décision utilisateur round 6 — "il faudrait que les
+    opérateurs aient accès aux vues détaillées des cellules"). Reste en
+    lecture seule : les actions de résolution restent réservées à la
+    Maintenance.
     """
     axes = await fetch_axis_data(cell_id)
     return {"status": "ok", "cell_id": cell_id, "axes": axes}
@@ -250,7 +301,7 @@ async def get_cell_axes(
 async def get_cell_measures(
     cell_id: int,
     hours: int = 24,
-    current_user: dict = Depends(require_role("MAINTENANCE")),
+    current_user: dict = Depends(require_role("MAINTENANCE", "OPERATEUR")),
     session: Session = Depends(get_session),
 ):
     """Retourne l'historique persisté (axes + cellule) sur les N dernières heures."""
@@ -373,15 +424,10 @@ async def record_maintenance_intervention(
             and resolved_defaut.type_defaut == MAINTENANCE_REPORTED_ISSUE_TYPE
             and resolved_defaut.severite == db.DEFAUT_SEVERITE_CRITIQUE
         ):
-            other_active_critical = [
-                f
-                for f in db.list_defauts(session, cellule_id=resolved_defaut.cellule_id)
-                if f.id != resolved_defaut.id
-                and f.type_defaut == MAINTENANCE_REPORTED_ISSUE_TYPE
-                and f.severite == db.DEFAUT_SEVERITE_CRITIQUE
-                and f.statut != db.DEFAUT_STATUT_RESOLU
-            ]
-            if not other_active_critical:
+            cell_still_critical = _has_active_manual_critical_issue(
+                session, resolved_defaut.cellule_id
+            )
+            if not cell_still_critical:
                 try:
                     await apply_simulated_action(
                         resolved_defaut.cellule_id, "ack_fault"
@@ -545,6 +591,25 @@ async def simu_action(
                 ),
             )
 
+        blocked_ack_fault = action == "ack_fault" and _has_active_manual_critical_issue(
+            session, cell_id
+        )
+        if blocked_ack_fault:
+            # CHG-V2 round 6 : une anomalie CRITIQUE signalée par la
+            # Maintenance (report-issue) ne doit être levée que via le
+            # bouton "Intervenir" dédié à cette anomalie (vue détaillée de
+            # la cellule), jamais par "Acquitter le défaut" du panneau de
+            # simulation POC — réservé aux défauts de test (force_fault).
+            raise HTTPException(
+                status_code=409,
+                detail=(
+                    "Cette cellule a une anomalie critique signalée par la "
+                    'Maintenance : utilisez le bouton "Intervenir" dédié '
+                    "dans la vue détaillée de la cellule, pas l'acquittement "
+                    "du panneau de simulation."
+                ),
+            )
+
         await apply_simulated_action(cell_id, action)
 
         if action == "force_fault":
@@ -561,7 +626,16 @@ async def simu_action(
             db.resolve_last_defaut(session, cell_id)
 
         elif action == "ack_maint":
-            active_maintenance_requests.pop(cell_id, None)
+            # Ne PAS toucher à active_maintenance_requests ici : une demande
+            # générique d'intervention lancée par l'Opérateur (bouton
+            # "Demander une intervention") est indépendante du compteur de
+            # maintenance préventive — clore la maintenance (compteur à 0)
+            # ne signifie pas que la demande de l'opérateur a été traitée
+            # (cf. bug signalé round 6 : "ça dit que j'ai aussi fait la
+            # demande de maintenance de l'opérateur ce qui n'est pas
+            # forcément le cas"). Cette demande reste visible tant qu'elle
+            # n'est pas explicitement prise en charge via
+            # /api/maintenance/acknowledge-request.
             db.add_history_entry(
                 session,
                 action=f"Intervention terminée sur Cellule {cell_id}",

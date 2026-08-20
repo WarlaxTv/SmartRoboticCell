@@ -266,6 +266,141 @@ def test_simu_action_ack_maint_allowed_when_due(
     assert calls == [(1, "ack_maint")]
 
 
+def test_status_includes_active_issues_grouped_by_cell(client: TestClient) -> None:
+    """Round 6 : le badge d'alerte du dashboard (visible sans ouvrir la vue
+    détaillée) s'appuie sur data.active_issues, une agrégation par cellule
+    des défauts non résolus (compte + sévérité max)."""
+
+    with Session(db.engine) as session:
+        db.add_defaut(
+            session,
+            cellule_id=131,
+            type_defaut=web_server.MAINTENANCE_REPORTED_ISSUE_TYPE,
+            severite="avertissement",
+            description="Bruit anormal",
+        )
+        resolved_id = db.add_defaut(
+            session,
+            cellule_id=131,
+            type_defaut=web_server.MAINTENANCE_REPORTED_ISSUE_TYPE,
+            severite="critique",
+            description="Déjà réglé",
+        ).id
+        db.set_defaut_statut(session, resolved_id, db.DEFAUT_STATUT_RESOLU)
+
+    token = _make_token("jean_ope", "OPERATEUR")
+    resp = client.get("/api/status", headers=_auth_header(token))
+    assert resp.status_code == 200
+    active_issues = resp.json()["active_issues"]
+    # Le défaut résolu ne doit pas compter ; seul l'avertissement actif reste.
+    assert active_issues["131"] == {"count": 1, "max_severity": "avertissement"}
+
+
+def test_ack_maint_does_not_clear_operator_generic_request(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Round 6 : "Faire la maintenance" (ack_maint, compteur à 0) est
+    indépendant d'une demande générique d'intervention lancée par
+    l'Opérateur — clore l'un ne doit pas effacer l'autre (bug signalé :
+    "ça dit que j'ai aussi fait la demande de maintenance de l'opérateur
+    ce qui n'est pas forcément le cas")."""
+
+    async def _due(_cell_id: int) -> bool:
+        return True
+
+    async def _apply(_cell_id: int, _action: str) -> None:
+        return None
+
+    monkeypatch.setattr(web_server, "is_maintenance_due", _due)
+    monkeypatch.setattr(web_server, "apply_simulated_action", _apply)
+    client = TestClient(web_server.app)
+
+    op_token = _make_token("jean_ope", "OPERATEUR")
+    client.post(
+        "/api/maintenance/request?cell_id=32&message=Bruit",
+        headers=_auth_header(op_token),
+    )
+
+    maint_token = _make_token("luc_maint", "MAINTENANCE")
+    resp = client.post(
+        "/api/simu/action?cell_id=32&action=ack_maint",
+        headers=_auth_header(maint_token),
+    )
+    assert resp.status_code == 200
+
+    status_after = client.get("/api/status", headers=_auth_header(op_token)).json()
+    assert status_after["maint_requests"].get("32") == {
+        "username": "jean_ope",
+        "message": "Bruit",
+    }
+
+
+def test_ack_fault_blocked_when_manual_critical_issue_active(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Round 6 : "Acquitter le défaut" du panneau de simulation POC ne doit
+    PAS lever une anomalie critique signalée par la Maintenance — seul le
+    bouton "Intervenir" dédié doit pouvoir le faire."""
+
+    async def _apply(_cell_id: int, _action: str) -> None:
+        raise AssertionError(
+            "apply_simulated_action ne doit pas être appelé : ack_fault doit "
+            "être bloqué par une anomalie critique Maintenance active"
+        )
+
+    monkeypatch.setattr(web_server, "apply_simulated_action", _apply)
+
+    with Session(db.engine) as session:
+        db.add_defaut(
+            session,
+            cellule_id=33,
+            type_defaut=web_server.MAINTENANCE_REPORTED_ISSUE_TYPE,
+            severite="critique",
+            description="Fuite hydraulique critique",
+        )
+
+    client = TestClient(web_server.app)
+    token = _make_token("luc_maint", "MAINTENANCE")
+    resp = client.post(
+        "/api/simu/action?cell_id=33&action=ack_fault",
+        headers=_auth_header(token),
+    )
+    assert resp.status_code == 409
+
+
+def test_ack_fault_allowed_for_poc_test_fault(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Un défaut simulé via le panneau POC (force_fault) reste bien
+    acquittable normalement : seule une anomalie critique signalée par la
+    Maintenance bloque ack_fault."""
+
+    calls: list[tuple[int, str]] = []
+
+    async def _apply(cell_id: int, action: str) -> None:
+        calls.append((cell_id, action))
+
+    monkeypatch.setattr(web_server, "apply_simulated_action", _apply)
+
+    with Session(db.engine) as session:
+        db.add_defaut(
+            session,
+            cellule_id=34,
+            type_defaut=web_server.FAULT_TYPE_MANUAL,
+            severite="critique",
+            description="Défaut forcé depuis le panneau de simulation (POC).",
+        )
+
+    client = TestClient(web_server.app)
+    token = _make_token("luc_maint", "MAINTENANCE")
+    resp = client.post(
+        "/api/simu/action?cell_id=34&action=ack_fault",
+        headers=_auth_header(token),
+    )
+    assert resp.status_code == 200
+    assert calls == [(34, "ack_fault")]
+
+
 def test_report_issue_critical_triggers_opcua_fault(
     client: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -808,10 +943,21 @@ def test_static_chart_js_is_served_locally(client: TestClient) -> None:
     assert "Chart" in resp.text
 
 
-def test_get_cell_axes_forbidden_for_operator(client: TestClient) -> None:
+def test_get_cell_axes_readable_by_operator(
+    monkeypatch: pytest.MonkeyPatch, client: TestClient
+) -> None:
+    """Round 6 : la vue détaillée de la cellule (dont les axes moteurs en
+    direct) est ouverte en lecture à l'Opérateur, comme le reste de la page
+    /cell/{id} (cf. décision utilisateur : "il faudrait que les opérateurs
+    aient accès aux vues détaillées des cellules")."""
+
+    async def _fake_fetch_axis_data(_cell_id: int) -> list[dict[str, Any]]:
+        return [{"axe": 1, "temperature_c": 30.0, "courant_a": 1.0, "couple_nm": 5.0}]
+
+    monkeypatch.setattr(web_server, "fetch_axis_data", _fake_fetch_axis_data)
     token = _make_token("jean_ope", "OPERATEUR")
     resp = client.get("/api/cell/1/axes", headers=_auth_header(token))
-    assert resp.status_code == 403
+    assert resp.status_code == 200
 
 
 def test_get_cell_axes_ok(monkeypatch: pytest.MonkeyPatch, client: TestClient) -> None:
@@ -868,10 +1014,13 @@ def test_get_cell_measures_ok(client: TestClient) -> None:
     assert body["cell_measures"][0]["pneumatic_pressure_bar"] == 6.0
 
 
-def test_get_cell_measures_forbidden_for_operator(client: TestClient) -> None:
+def test_get_cell_measures_readable_by_operator(client: TestClient) -> None:
+    """Round 6 : mêmes raisons que test_get_cell_axes_readable_by_operator —
+    les courbes de la vue détaillée doivent aussi être consultables par
+    l'Opérateur (lecture seule, aucune action de résolution)."""
     token = _make_token("jean_ope", "OPERATEUR")
     resp = client.get("/api/cell/1/measures", headers=_auth_header(token))
-    assert resp.status_code == 403
+    assert resp.status_code == 200
 
 
 def test_get_faults_history_ok(client: TestClient) -> None:

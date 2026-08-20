@@ -48,6 +48,7 @@
                 <div id="active-issues-block">
                     <p class="empty" id="active-issues-loading">Chargement...</p>
                 </div>
+                <div id="generic-request-block"></div>
                 <button type="button" class="btn btn-maint" id="report-issue-btn" style="margin-top:14px;" onclick="openReportIssueModal()">Signaler un problème</button>
             </div>
             <div class="card">
@@ -91,19 +92,19 @@
 
         <div class="grid">
             <div class="card">
-                <h2><span id="title-chart-temp">Température par axe (°C)</span> <button type="button" class="chart-zoom-btn" onclick="zoomChart('temp')" title="Agrandir">⤢</button></h2>
+                <h2><span id="title-chart-temp">Température par axe (°C)</span> <span><button type="button" class="chart-zoom-btn chart-dl-btn" id="dl-btn-temp" onclick="downloadChart('temp')" title="Télécharger l'image">&#8681;</button><button type="button" class="chart-zoom-btn" onclick="zoomChart('temp')" title="Agrandir">⤢</button></span></h2>
                 <canvas id="chart-temp"></canvas>
             </div>
             <div class="card">
-                <h2><span id="title-chart-courant">Courant par axe (A)</span> <button type="button" class="chart-zoom-btn" onclick="zoomChart('courant')" title="Agrandir">⤢</button></h2>
+                <h2><span id="title-chart-courant">Courant par axe (A)</span> <span><button type="button" class="chart-zoom-btn chart-dl-btn" id="dl-btn-courant" onclick="downloadChart('courant')" title="Télécharger l'image">&#8681;</button><button type="button" class="chart-zoom-btn" onclick="zoomChart('courant')" title="Agrandir">⤢</button></span></h2>
                 <canvas id="chart-courant"></canvas>
             </div>
             <div class="card">
-                <h2><span id="title-chart-couple">Couple par axe (N·m)</span> <button type="button" class="chart-zoom-btn" onclick="zoomChart('couple')" title="Agrandir">⤢</button></h2>
+                <h2><span id="title-chart-couple">Couple par axe (N·m)</span> <span><button type="button" class="chart-zoom-btn chart-dl-btn" id="dl-btn-couple" onclick="downloadChart('couple')" title="Télécharger l'image">&#8681;</button><button type="button" class="chart-zoom-btn" onclick="zoomChart('couple')" title="Agrandir">⤢</button></span></h2>
                 <canvas id="chart-couple"></canvas>
             </div>
             <div class="card">
-                <h2><span id="title-chart-cell">Pression pneumatique (bar) &amp; Niveau lubrifiant (%)</span> <button type="button" class="chart-zoom-btn" onclick="zoomChart('cell')" title="Agrandir">⤢</button></h2>
+                <h2><span id="title-chart-cell">Pression pneumatique (bar) &amp; Niveau lubrifiant (%)</span> <span><button type="button" class="chart-zoom-btn chart-dl-btn" id="dl-btn-cell" onclick="downloadChart('cell')" title="Télécharger l'image">&#8681;</button><button type="button" class="chart-zoom-btn" onclick="zoomChart('cell')" title="Agrandir">⤢</button></span></h2>
                 <canvas id="chart-cell"></canvas>
             </div>
         </div>
@@ -210,6 +211,13 @@
                 requestedBy: "par",
                 noActiveIssues: "Aucun problème actif signalé sur cette cellule.",
                 activeIssuesTitle: "Problèmes actifs sur cette cellule :",
+                genericRequestTitle: "Demande d'intervention opérateur :",
+                requestMessage: "Message",
+                ackButton: "Prise en charge",
+                ackPromptTitle: "Prise en charge de la demande",
+                ackPromptPlaceholder: "Notes de la Maintenance (optionnel)...",
+                ackSuccess: "Demande prise en charge.",
+                ackError: "Erreur lors de la prise en charge.",
                 reportIssueBtn: "Signaler un problème",
                 reportIssueModalTitle: "Signaler un problème",
                 reportIssueSeverityLabel: "Sévérité",
@@ -256,6 +264,13 @@
                 requestedBy: "by",
                 noActiveIssues: "No active issue reported on this cell.",
                 activeIssuesTitle: "Active issues on this cell:",
+                genericRequestTitle: "Operator intervention request:",
+                requestMessage: "Message",
+                ackButton: "Acknowledge",
+                ackPromptTitle: "Acknowledge request",
+                ackPromptPlaceholder: "Maintenance notes (optional)...",
+                ackSuccess: "Request acknowledged.",
+                ackError: "Error while acknowledging the request.",
                 reportIssueBtn: "Report an issue",
                 reportIssueModalTitle: "Report an issue",
                 reportIssueSeverityLabel: "Severity",
@@ -424,6 +439,25 @@
             openChartZoom(entry.title, entry.datasets, options);
         }
 
+        // Correspondance clé de graphique -> instance Chart.js vivante,
+        // pour le téléchargement d'image (cf. downloadChartAsImage dans
+        // common.js). Réservé à la Maintenance (bouton masqué pour
+        // l'Opérateur, cf. RBAC round 6).
+        function chartInstanceFor(key) {
+            if (key === 'temp') return tempChart;
+            if (key === 'courant') return courantChart;
+            if (key === 'couple') return coupleChart;
+            if (key === 'cell') return cellChart;
+            return null;
+        }
+
+        function downloadChart(key) {
+            const entry = chartRegistry[key];
+            if (!entry) return;
+            const safeTitle = entry.title.replace(/[^a-z0-9]+/gi, '_').toLowerCase();
+            downloadChartAsImage(chartInstanceFor(key), `cellule_${cellId}_${safeTitle}.png`);
+        }
+
         function renderAxisCharts() {
             const tempSets = buildAxisDatasets(lastAxisMeasures, 'temperature_c');
             const courantSets = buildAxisDatasets(lastAxisMeasures, 'courant_a');
@@ -443,7 +477,7 @@
         }
 
         async function loadMeasures() {
-            if (currentRole !== 'MAINTENANCE') return;
+            if (currentRole !== 'MAINTENANCE' && currentRole !== 'OPERATEUR') return;
             const hours = document.getElementById('range-select').value;
             try {
                 const resp = await fetch(`/api/cell/${cellId}/measures?hours=${hours}`, {
@@ -481,7 +515,7 @@
         }
 
         async function loadLiveAxes() {
-            if (currentRole !== 'MAINTENANCE') return;
+            if (currentRole !== 'MAINTENANCE' && currentRole !== 'OPERATEUR') return;
             try {
                 const resp = await fetch(`/api/cell/${cellId}/axes`, {
                     headers: { 'Authorization': `Bearer ${token}` },
@@ -508,7 +542,7 @@
         // panneau "Informations générales" se concentre sur les problèmes
         // actifs et le signalement d'anomalie.
         async function loadAdvancedDiagnostics() {
-            if (currentRole !== 'MAINTENANCE') return;
+            if (currentRole !== 'MAINTENANCE' && currentRole !== 'OPERATEUR') return;
             try {
                 const resp = await fetch('/api/status', {
                     headers: { 'Authorization': `Bearer ${token}` },
@@ -516,12 +550,12 @@
                 if (!resp.ok) return;
                 const data = await resp.json();
                 const cell = (data.cells || []).find((c) => c.id === cellId);
-                if (!cell) return;
-                if (cell.name && cell.name !== lastKnownCellName) {
+                if (cell && cell.name && cell.name !== lastKnownCellName) {
                     lastKnownCellName = cell.name;
                     document.getElementById('page-title').innerText =
                         `${t('pageTitleFallback', { id: cellId })} — ${lastKnownCellName}`;
                 }
+                renderGenericRequest((data.maint_requests || {})[cellId]);
             } catch (e) { console.error(e); }
         }
 
@@ -536,6 +570,8 @@
             // pouvoir les régler un par un avec un message optionnel, sans
             // devoir passer par la page Historique des défauts — même flux
             // (/api/maintenance/intervention) que sur cette dernière.
+            // Réservé à la Maintenance : l'Opérateur voit les problèmes actifs
+            // mais ne peut pas les résoudre (cf. décision utilisateur round 6).
             const items = active.map((f) => `
                 <div class="history-item">
                     <div class="history-item-main">
@@ -544,10 +580,66 @@
                         <span class="${faultStatusTagClass(f.fault_status)}">(${statusLabel(f.fault_status)})</span>
                         <div style="color:#6E6E73;">${translateFaultText(f.description)}</div>
                     </div>
-                    <button class="btn btn-intervene" onclick="openInterventionModal(${f.id})">${t('intervene')}</button>
+                    ${currentRole === 'MAINTENANCE' ? `<button class="btn btn-intervene" onclick="openInterventionModal(${f.id})">${t('intervene')}</button>` : ''}
                 </div>
             `).join('');
             block.innerHTML = `<p style="font-weight:600; margin:0 0 6px 0;">${t('activeIssuesTitle')}</p>${items}`;
+        }
+
+        // Sous-catégorie "Demande d'intervention opérateur" dans le panneau
+        // Informations générales : distincte des défauts ci-dessus, car une
+        // demande générique (bouton "Demander une intervention" côté
+        // opérateur) n'est liée à aucun défaut précis (cf. demande
+        // utilisateur round 6 : "si opé demande intervention maintenance,
+        // qu'elle apparaisse dans informations générales, une sous
+        // catégorie"). Le bouton "Prise en charge" reste réservé à la
+        // Maintenance, comme sur la page Historique Maintenance.
+        function renderGenericRequest(requestInfo) {
+            const block = document.getElementById('generic-request-block');
+            if (!requestInfo) {
+                block.innerHTML = '';
+                return;
+            }
+            const username = requestInfo.username || requestInfo;
+            const message = requestInfo.message
+                ? `<div style="color:#6E6E73;">${t('requestMessage')} : ${requestInfo.message}</div>`
+                : '';
+            const ackBtn = currentRole === 'MAINTENANCE'
+                ? `<button class="btn btn-intervene" onclick="openGenericAckPrompt()">${t('ackButton')}</button>`
+                : '';
+            block.innerHTML = `
+                <div class="history-item" style="margin-top:10px;">
+                    <div class="history-item-main">
+                        <strong>${t('genericRequestTitle')}</strong>
+                        <div style="color:#6E6E73;">(${t('requestedBy')} ${username})</div>
+                        ${message}
+                    </div>
+                    ${ackBtn}
+                </div>
+            `;
+        }
+
+        function openGenericAckPrompt() {
+            openTextPromptModal(t('ackPromptTitle'), t('ackPromptPlaceholder'), (message) => {
+                acknowledgeGenericRequestForCell(message);
+            });
+        }
+
+        async function acknowledgeGenericRequestForCell(message) {
+            try {
+                const params = new URLSearchParams({ cell_id: cellId });
+                if (message) params.set('message', message);
+                const response = await fetch(`/api/maintenance/acknowledge-request?${params.toString()}`, {
+                    method: 'POST',
+                    headers: { 'Authorization': `Bearer ${token}` },
+                });
+                if (response.ok) {
+                    showModal(t('ackSuccess'), 'success');
+                    loadAdvancedDiagnostics();
+                } else {
+                    showModal(t('ackError'), 'error');
+                }
+            } catch (e) { console.error(e); }
         }
 
         let interventionTargetDefautId = null;
@@ -598,7 +690,7 @@
         }
 
         async function loadFaults() {
-            if (currentRole !== 'MAINTENANCE') return;
+            if (currentRole !== 'MAINTENANCE' && currentRole !== 'OPERATEUR') return;
             try {
                 const resp = await fetch(`/api/faults/history?cell_id=${cellId}`, {
                     headers: { 'Authorization': `Bearer ${token}` },
@@ -664,7 +756,7 @@
         }
 
         async function loadMaintenanceHistory() {
-            if (currentRole !== 'MAINTENANCE') return;
+            if (currentRole !== 'MAINTENANCE' && currentRole !== 'OPERATEUR') return;
             try {
                 const resp = await fetch(`/api/maintenance/history?cell_id=${cellId}`, {
                     headers: { 'Authorization': `Bearer ${token}` },
@@ -684,11 +776,24 @@
             } catch (e) { console.error(e); }
         }
 
-        if (currentRole !== 'MAINTENANCE') {
+        // Vue détaillée ouverte à la Maintenance ET à l'Opérateur en lecture
+        // (cf. décision utilisateur round 6). Seules les actions de
+        // résolution (Intervenir, Signaler un problème, Prise en charge)
+        // restent réservées à la Maintenance — cf. gates ciblées plus bas
+        // (report-issue-btn masqué, boutons "Intervenir"/"Prise en charge"
+        // non générés pour l'Opérateur).
+        if (currentRole !== 'MAINTENANCE' && currentRole !== 'OPERATEUR') {
             applyLanguage();
             document.getElementById('access-denied').classList.remove('hidden');
         } else {
             applyLanguage();
+            if (currentRole !== 'MAINTENANCE') {
+                document.getElementById('report-issue-btn').classList.add('hidden');
+                // Téléchargement d'image de courbe réservé à la Maintenance
+                // ("la seule chose que l'opérateur ne peut pas faire c'est
+                // créer des alertes, ni télécharger les graphs").
+                document.querySelectorAll('.chart-dl-btn').forEach((el) => el.classList.add('hidden'));
+            }
             document.getElementById('page-content').classList.remove('hidden');
             loadAdvancedDiagnostics();
             loadLiveAxes();
