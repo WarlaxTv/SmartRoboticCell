@@ -7,7 +7,7 @@
     <meta http-equiv="Pragma" content="no-cache" />
     <meta http-equiv="Expires" content="0" />
     <title>Supervision Usine - NF EN 9100</title>
-    <link rel="stylesheet" href="/static/theme.css">
+    <link rel="stylesheet" href="{{ static_v('theme.css') }}">
 </head>
 <body>
 
@@ -54,7 +54,7 @@
         </div>
     </main>
 
-    <script src="/static/common.js"></script>
+    <script src="{{ static_v('common.js') }}"></script>
     <script>
         let token = localStorage.getItem('jwt_token');
         let currentRole = localStorage.getItem('user_role');

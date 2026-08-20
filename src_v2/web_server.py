@@ -187,6 +187,32 @@ static_dir = os.path.join(os.path.dirname(__file__), "static")
 os.makedirs(static_dir, exist_ok=True)
 app.mount("/static", StaticFiles(directory=static_dir), name="static")
 
+
+def _static_url(filename: str) -> str:
+    """URL d'un fichier de /static suffixée par un paramètre de version basé
+    sur sa date de modification sur disque.
+
+    _html_page() ci-dessus met des en-têtes anti-cache sur les PAGES HTML,
+    mais pas sur les fichiers de /static (common.js, theme.css) : le
+    navigateur peut donc continuer à servir une copie mise en cache de
+    common.js même après une mise à jour du code, alors que la page HTML
+    (elle, rechargée) appelle déjà de nouvelles fonctions qui n'existent pas
+    encore dans cette copie obsolète — ReferenceError silencieuse côté
+    client (attrapée par les try/catch existants), qui s'est traduite par
+    des courbes et téléchargements qui ne fonctionnaient plus du tout après
+    une mise à jour de common.js (cf. CHG-V2-085). Faire varier l'URL dès
+    que le fichier change force le navigateur à le re-télécharger.
+    """
+    path = os.path.join(static_dir, filename)
+    try:
+        version = int(os.path.getmtime(path))
+    except OSError:
+        version = 0
+    return f"/static/{filename}?v={version}"
+
+
+templates.env.globals["static_v"] = _static_url
+
 # Appels opérateurs actifs (état transitoire, volontairement en mémoire).
 # Valeur = {"username": ..., "message": ...} : le message optionnel saisi par
 # l'opérateur doit rester visible sur la demande en attente elle-même (pas

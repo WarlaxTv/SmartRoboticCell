@@ -7,8 +7,8 @@
     <meta http-equiv="Pragma" content="no-cache" />
     <meta http-equiv="Expires" content="0" />
     <title>Détail Cellule {{ cell_id }} - Supervision NF EN 9100</title>
-    <link rel="stylesheet" href="/static/theme.css">
-    <script src="/static/chart.umd.js"></script>
+    <link rel="stylesheet" href="{{ static_v('theme.css') }}">
+    <script src="{{ static_v('chart.umd.js') }}"></script>
     <style>
         .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(420px, 1fr)); gap: 20px; margin-bottom: 20px; }
         .card h2 { margin: 0 0 16px 0; font-size: 1em; font-weight: 600; border-bottom: 1px solid var(--border); padding-bottom: 10px; display: flex; align-items: center; justify-content: space-between; }
@@ -178,7 +178,7 @@
         </div>
     </div>
 
-    <script src="/static/common.js"></script>
+    <script src="{{ static_v('common.js') }}"></script>
     <script>
         const cellId = {{ cell_id }};
         const token = localStorage.getItem('jwt_token');

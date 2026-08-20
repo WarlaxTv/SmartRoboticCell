@@ -7,8 +7,8 @@
     <meta http-equiv="Pragma" content="no-cache" />
     <meta http-equiv="Expires" content="0" />
     <title>Données - Supervision NF EN 9100</title>
-    <link rel="stylesheet" href="/static/theme.css">
-    <script src="/static/chart.umd.js"></script>
+    <link rel="stylesheet" href="{{ static_v('theme.css') }}">
+    <script src="{{ static_v('chart.umd.js') }}"></script>
     <style>
         .grid2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(420px, 1fr)); gap: 20px; }
         canvas { max-height: 280px; }
@@ -82,7 +82,7 @@
         </div>
     </main>
 
-    <script src="/static/common.js"></script>
+    <script src="{{ static_v('common.js') }}"></script>
     <script>
         const I18N = {
             fr: {
