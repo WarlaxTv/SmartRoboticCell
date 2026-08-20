@@ -331,6 +331,71 @@ def test_maintenance_history_filters_by_cell_id(client: TestClient) -> None:
     assert not any("Cellule 3" in item.get("action", "") for item in body["history"])
 
 
+def test_operator_can_request_maintenance_with_message(client: TestClient) -> None:
+    op_token = _make_token("jean_ope", "OPERATEUR")
+    resp = client.post(
+        "/api/maintenance/request?cell_id=7&message=Bruit anormal sur l'axe 3",
+        headers=_auth_header(op_token),
+    )
+    assert resp.status_code == 200
+
+    maint_token = _make_token("luc_maint", "MAINTENANCE")
+    history = client.get(
+        "/api/maintenance/history", headers=_auth_header(maint_token)
+    ).json()
+    assert any(
+        "Bruit anormal sur l'axe 3" in item.get("action", "")
+        for item in history["history"]
+    )
+
+
+def test_generic_request_appears_in_status_until_acknowledged(
+    client: TestClient,
+) -> None:
+    op_token = _make_token("jean_ope", "OPERATEUR")
+    client.post("/api/maintenance/request?cell_id=8", headers=_auth_header(op_token))
+
+    status_before = client.get("/api/status", headers=_auth_header(op_token)).json()
+    assert status_before["maint_requests"].get("8") == "jean_ope"
+
+    maint_token = _make_token("luc_maint", "MAINTENANCE")
+    ack_resp = client.post(
+        "/api/maintenance/acknowledge-request?cell_id=8",
+        headers=_auth_header(maint_token),
+    )
+    assert ack_resp.status_code == 200
+    assert ack_resp.json()["status"] == "ok"
+
+    status_after = client.get("/api/status", headers=_auth_header(op_token)).json()
+    assert "8" not in status_after["maint_requests"]
+
+    history = client.get(
+        "/api/maintenance/history", headers=_auth_header(maint_token)
+    ).json()
+    assert any(
+        "Prise en charge" in item.get("action", "") and item.get("cell_id") == 8
+        for item in history["history"]
+    )
+
+
+def test_acknowledge_request_forbidden_for_operator(client: TestClient) -> None:
+    op_token = _make_token("jean_ope", "OPERATEUR")
+    resp = client.post(
+        "/api/maintenance/acknowledge-request?cell_id=8",
+        headers=_auth_header(op_token),
+    )
+    assert resp.status_code == 403
+
+
+def test_acknowledge_unknown_request_returns_404(client: TestClient) -> None:
+    maint_token = _make_token("luc_maint", "MAINTENANCE")
+    resp = client.post(
+        "/api/maintenance/acknowledge-request?cell_id=42",
+        headers=_auth_header(maint_token),
+    )
+    assert resp.status_code == 404
+
+
 def test_read_cell_detail_serves_html(client: TestClient) -> None:
     resp = client.get("/cell/1")
     assert resp.status_code == 200

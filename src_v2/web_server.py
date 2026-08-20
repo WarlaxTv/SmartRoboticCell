@@ -4,7 +4,7 @@ import asyncio
 import logging
 import os
 from contextlib import asynccontextmanager
-from datetime import UTC, datetime, timedelta
+from datetime import datetime, timedelta
 
 import uvicorn
 from cryptography import x509
@@ -243,7 +243,10 @@ async def get_cell_measures(
     session: Session = Depends(get_session),
 ):
     """Retourne l'historique persisté (axes + cellule) sur les N dernières heures."""
-    since = (datetime.now(UTC) - timedelta(hours=hours)).strftime("%Y-%m-%d %H:%M:%S")
+    # Heure locale, cohérente avec db.py::horodatage (voir commentaire db.py
+    # sur le choix local vs UTC) : comparer un "since" en UTC à des
+    # horodatages stockés en heure locale aurait décalé la fenêtre filtrée.
+    since = (datetime.now() - timedelta(hours=hours)).strftime("%Y-%m-%d %H:%M:%S")
     axis_measures = db.list_axis_measures(session, cell_id, since)
     cell_measures = db.list_cell_measures(session, cell_id, since)
     return {
@@ -348,20 +351,60 @@ async def record_maintenance_intervention(
 @app.post("/api/maintenance/request")
 async def request_maintenance(
     cell_id: int,
+    message: str = "",
     current_user: dict = Depends(require_role("OPERATEUR")),
     session: Session = Depends(get_session),
 ):
-    """Permet à un Opérateur de demander une maintenance."""
+    """Permet à un Opérateur de demander une maintenance.
+
+    ``message`` est un commentaire libre optionnel saisi par l'opérateur
+    (ex. nature du problème observé) — répercuté tel quel dans l'historique.
+    """
     # On ajoute la cellule aux requêtes actives
     active_maintenance_requests[cell_id] = current_user["username"]
 
+    action = f"Demande d'intervention sur Cellule {cell_id}"
+    if message:
+        action = f"{action}. Message : {message}"
+
     db.add_history_entry(
         session,
-        action=f"Demande d'intervention sur Cellule {cell_id}",
+        action=action,
         username_auteur=current_user["username"],
         cellule_id=cell_id,
     )
     return {"status": "ok", "msg": "Demande enregistrée"}
+
+
+@app.post("/api/maintenance/acknowledge-request")
+async def acknowledge_maintenance_request(
+    cell_id: int,
+    current_user: dict = Depends(require_role("MAINTENANCE")),
+    session: Session = Depends(get_session),
+):
+    """Permet à la Maintenance de prendre en charge une demande générique.
+
+    Une demande générique (bouton "Demander une intervention" côté
+    opérateur, cf. /api/maintenance/request) n'est liée à aucun défaut
+    précis — elle vit uniquement dans ``active_maintenance_requests``. Ce
+    endpoint la retire de la liste des demandes actives et journalise la
+    prise en charge, sans toucher à un éventuel défaut (voir
+    /api/maintenance/intervention pour ce cas).
+    """
+    if cell_id not in active_maintenance_requests:
+        raise HTTPException(
+            status_code=404, detail="Aucune demande active pour cette cellule"
+        )
+
+    active_maintenance_requests.pop(cell_id, None)
+
+    db.add_history_entry(
+        session,
+        action=f"Prise en charge de la demande d'intervention sur Cellule {cell_id}",
+        username_auteur=current_user["username"],
+        cellule_id=cell_id,
+    )
+    return {"status": "ok"}
 
 
 @app.post("/api/simu/action")

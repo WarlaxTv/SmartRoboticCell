@@ -38,6 +38,41 @@ function faultStatusTagClass(status) {
     return FAULT_STATUS_TAG_CLASS[status] || "unresolved-tag";
 }
 
+/* Traduction FR→EN des libellés de défauts (type_defaut/description, voir
+ * src_v2/db.py::DefautHistorique). Contrairement à l'historique de
+ * maintenance (action librement composée, notes libres saisies par un
+ * utilisateur — jamais retraduites, cf. CHG-V2-057), le vocabulaire des
+ * défauts est fermé et connu à l'avance : il vient uniquement du catalogue
+ * de démonstration (scripts/seed_historical_data.py::FAULT_TYPES) ou du
+ * panneau de simulation (web_server.py::FAULT_TYPE_MANUAL). Un texte qui ne
+ * correspond à aucune entrée connue est renvoyé inchangé (pas de perte de
+ * données si le catalogue évolue sans que cette liste soit mise à jour).
+ * Tableau (et non objet) pour préserver l'ordre d'application : les phrases
+ * complètes doivent être remplacées avant le mot générique "Cellule". */
+const FAULT_TEXT_FR_TO_EN = [
+    ["Défaut capteur température", "Temperature sensor fault"],
+    ["Surcharge moteur (courant élevé)", "Motor overload (high current)"],
+    ["Perte de communication OPC UA", "OPC UA communication loss"],
+    ["Pression pneumatique hors tolérance", "Pneumatic pressure out of tolerance"],
+    ["Niveau lubrifiant bas", "Low lubricant level"],
+    ["Collision détectée (arrêt d'urgence)", "Collision detected (emergency stop)"],
+    ["Dérive de trajectoire (recalibrage requis)", "Trajectory drift (recalibration required)"],
+    ["Défaut préhenseur / pince", "Gripper fault"],
+    ["Défaut déclenché manuellement (simulation)", "Fault manually triggered (simulation)"],
+    ["Défaut forcé depuis le panneau de simulation (POC).", "Fault forced from the simulation panel (POC)."],
+    ["(jeu de données historique)", "(historical demo dataset)"],
+    ["Cellule", "Cell"],
+];
+
+function translateFaultText(text) {
+    if (navLang() !== 'en' || !text) return text;
+    let result = text;
+    for (const [fr, en] of FAULT_TEXT_FR_TO_EN) {
+        result = result.split(fr).join(en);
+    }
+    return result;
+}
+
 const NAV_I18N = {
     fr: {
         navMenu: "Menu",
@@ -51,6 +86,8 @@ const NAV_I18N = {
         modalErrorTitle: "Erreur",
         modalSuccessTitle: "Succès",
         modalInfoTitle: "Information",
+        promptSubmit: "Envoyer",
+        promptCancel: "Annuler",
         accessDeniedTitle: "Accès réservé",
         accessDeniedBody: "Cette page est réservée au rôle MAINTENANCE.",
         accessDeniedBack: "Retour au dashboard",
@@ -67,6 +104,8 @@ const NAV_I18N = {
         modalErrorTitle: "Error",
         modalSuccessTitle: "Success",
         modalInfoTitle: "Information",
+        promptSubmit: "Send",
+        promptCancel: "Cancel",
         accessDeniedTitle: "Restricted access",
         accessDeniedBody: "This page is restricted to the MAINTENANCE role.",
         accessDeniedBack: "Back to dashboard",
@@ -222,8 +261,76 @@ function closeModal() {
 }
 
 document.addEventListener('keydown', (evt) => {
-    if (evt.key === 'Escape') closeModal();
+    if (evt.key === 'Escape') {
+        closeModal();
+        closeTextPromptModal();
+    }
 });
+
+/* ---------- Fenêtre de saisie de texte libre (remplace prompt()) ---------- */
+
+let _textPromptCallback = null;
+
+function ensureTextPromptRoot() {
+    let overlay = document.getElementById('app-textprompt-overlay');
+    if (overlay) return overlay;
+
+    overlay = document.createElement('div');
+    overlay.id = 'app-textprompt-overlay';
+    overlay.className = 'modal-overlay';
+    overlay.innerHTML = `
+        <div class="modal-box">
+            <div class="modal-header" id="app-textprompt-header"></div>
+            <div class="modal-body">
+                <div class="form-field">
+                    <textarea id="app-textprompt-input" rows="3"></textarea>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-reset" id="app-textprompt-cancel-btn" onclick="closeTextPromptModal()"></button>
+                <button class="btn" id="app-textprompt-submit-btn" onclick="submitTextPromptModal()"></button>
+            </div>
+        </div>
+    `;
+    document.body.appendChild(overlay);
+    overlay.addEventListener('click', (evt) => {
+        if (evt.target === overlay) closeTextPromptModal();
+    });
+    return overlay;
+}
+
+/**
+ * Affiche une popup de saisie de texte libre, à la place d'un prompt()
+ * natif du navigateur. ``callback(text)`` n'est appelé QUE si
+ * l'utilisateur clique "Envoyer" (texte éventuellement vide) ; un clic sur
+ * "Annuler", en dehors de la popup, ou Échap ferme sans rien appeler.
+ */
+function openTextPromptModal(title, placeholder, callback) {
+    const overlay = ensureTextPromptRoot();
+    document.getElementById('app-textprompt-header').innerText = title;
+    const input = document.getElementById('app-textprompt-input');
+    input.value = '';
+    input.placeholder = placeholder || '';
+    document.getElementById('app-textprompt-cancel-btn').innerText = navT('promptCancel');
+    document.getElementById('app-textprompt-submit-btn').innerText = navT('promptSubmit');
+    _textPromptCallback = callback;
+    overlay.classList.add('open');
+    input.focus();
+}
+
+function closeTextPromptModal() {
+    const overlay = document.getElementById('app-textprompt-overlay');
+    if (overlay) overlay.classList.remove('open');
+    _textPromptCallback = null;
+}
+
+function submitTextPromptModal() {
+    const input = document.getElementById('app-textprompt-input');
+    const value = input ? input.value.trim() : '';
+    const callback = _textPromptCallback;
+    closeTextPromptModal();
+    if (callback) callback(value);
+}
 
 /* ---------- Agrandissement d'un graphique Chart.js ---------- */
 

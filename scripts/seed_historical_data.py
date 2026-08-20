@@ -26,7 +26,7 @@ from __future__ import annotations
 import os
 import random
 import sys
-from datetime import UTC, datetime, timedelta
+from datetime import datetime, timedelta
 
 if "SRC_DB_PATH" not in os.environ:
     print("SRC_DB_PATH doit être défini (copie du .db réel), abandon.", file=sys.stderr)
@@ -118,7 +118,7 @@ def _next_running_state(target_share: float, currently_running: bool | None) -> 
 
 
 def _seed_measures() -> tuple[int, int]:
-    now = datetime.now(UTC)
+    now = datetime.now()
     start = now - timedelta(days=DAYS_OF_HISTORY)
 
     axis_count = 0
@@ -210,7 +210,7 @@ def _seed_measures() -> tuple[int, int]:
 
 
 def _seed_faults() -> int:
-    now = datetime.now(UTC)
+    now = datetime.now()
     start = now - timedelta(days=DAYS_OF_HISTORY)
     total_span_seconds = int((now - start).total_seconds())
 

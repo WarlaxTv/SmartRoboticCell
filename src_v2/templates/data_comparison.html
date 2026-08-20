@@ -154,11 +154,28 @@
 
         let charts = {};
 
-        function lineChart(canvasId, datasets, yLabel) {
+        // Fusionne les horodatages de plusieurs séries (une par cellule) en une
+        // liste triée et dédupliquée. Les 3 cellules sont échantillonnées l'une
+        // après l'autre dans la même itération de la boucle de fond
+        // (web_server.py::_sampling_loop), donc leurs horodatages diffèrent de
+        // quelques secondes les uns des autres : sans fusion triée explicite,
+        // l'axe X "category" de Chart.js se contente de concaténer les
+        // horodatages dans l'ordre où il rencontre chaque nouveau jeu de
+        // données, ce qui produit des retours en arrière visibles sur les
+        // courbes (voir INC-V2-021).
+        function mergedSortedTimes(timedArrays) {
+            const seen = new Set();
+            for (const arr of timedArrays) {
+                for (const item of arr) seen.add(item.time);
+            }
+            return Array.from(seen).sort();
+        }
+
+        function lineChart(canvasId, labels, datasets, yLabel) {
             if (charts[canvasId]) charts[canvasId].destroy();
             charts[canvasId] = new Chart(document.getElementById(canvasId), {
                 type: 'line',
-                data: { datasets },
+                data: { labels, datasets },
                 options: {
                     scales: {
                         x: { type: 'category', ticks: { maxTicksLimit: 8, autoSkip: true } },
@@ -166,6 +183,11 @@
                     },
                     plugins: { legend: { position: 'bottom' } },
                     animation: false,
+                    // Chaque cellule n'a de point qu'à SES propres horodatages :
+                    // sur l'axe fusionné, ses autres positions n'ont pas de
+                    // valeur. spanGaps relie quand même la ligne au travers de
+                    // ces trous plutôt que de la couper, pour un tracé lisible.
+                    spanGaps: true,
                 },
             });
         }
@@ -173,6 +195,10 @@
         async function loadAll() {
             const hours = document.getElementById('range-select').value;
             const perCell = await Promise.all(CELLS.map((id) => fetchCellMeasures(id, hours)));
+            const avgPerCell = perCell.map((data) => averageAxesByTime(data.axis_measures));
+
+            const axisLabels = mergedSortedTimes(avgPerCell);
+            const cellMeasureLabels = mergedSortedTimes(perCell.map((data) => data.cell_measures));
 
             const tempSets = [], courantSets = [], coupleSets = [], pressureSets = [], lubrixSets = [];
 
@@ -180,7 +206,7 @@
                 const data = perCell[i];
                 const color = CELL_COLORS[i];
                 const label = `${t('cellLabel')} ${cellId}`;
-                const avg = averageAxesByTime(data.axis_measures);
+                const avg = avgPerCell[i];
 
                 tempSets.push({ label, data: avg.map(m => ({ x: m.time, y: m.temperature_c })), borderColor: color, backgroundColor: 'transparent', tension: 0.25, pointRadius: 0 });
                 courantSets.push({ label, data: avg.map(m => ({ x: m.time, y: m.courant_a })), borderColor: color, backgroundColor: 'transparent', tension: 0.25, pointRadius: 0 });
@@ -189,11 +215,11 @@
                 lubrixSets.push({ label, data: data.cell_measures.map(m => ({ x: m.time, y: m.lubrix_level_pct })), borderColor: color, backgroundColor: 'transparent', tension: 0.25, pointRadius: 0 });
             });
 
-            lineChart('chart-temp', tempSets, '°C');
-            lineChart('chart-courant', courantSets, 'A');
-            lineChart('chart-couple', coupleSets, 'N·m');
-            lineChart('chart-pressure', pressureSets, 'bar');
-            lineChart('chart-lubrix', lubrixSets, '%');
+            lineChart('chart-temp', axisLabels, tempSets, '°C');
+            lineChart('chart-courant', axisLabels, courantSets, 'A');
+            lineChart('chart-couple', axisLabels, coupleSets, 'N·m');
+            lineChart('chart-pressure', cellMeasureLabels, pressureSets, 'bar');
+            lineChart('chart-lubrix', cellMeasureLabels, lubrixSets, '%');
         }
 
         if (!token) {

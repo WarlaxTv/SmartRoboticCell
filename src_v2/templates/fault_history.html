@@ -223,8 +223,8 @@
                 : '';
             return `<div class="history-item">
                 <div class="history-item-main">
-                    <strong>${f.time}</strong> — ${cellDisplayName(f.cell_id)} — <span class="sev-${f.severity}">${f.type}</span><span class="${faultStatusTagClass(f.fault_status)}">(${statusLabel(f.fault_status)})</span>
-                    <div style="color:#6E6E73;">${f.description}</div>
+                    <strong>${f.time}</strong> — ${cellDisplayName(f.cell_id)} — <span class="sev-${f.severity}">${translateFaultText(f.type)}</span><span class="${faultStatusTagClass(f.fault_status)}">(${statusLabel(f.fault_status)})</span>
+                    <div style="color:#6E6E73;">${translateFaultText(f.description)}</div>
                 </div>
                 ${interveneBtn}
             </div>`;

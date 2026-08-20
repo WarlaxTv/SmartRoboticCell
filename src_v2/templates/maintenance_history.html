@@ -58,6 +58,12 @@
                         <p style="color:#6E6E73;" id="pending-loading-label">Chargement...</p>
                     </div>
                 </div>
+                <h3 id="generic-pending-title" style="margin:14px 0 8px 0; font-size:1em; color:#1D1D1F;">Demandes génériques</h3>
+                <div class="history-panel">
+                    <div id="generic-pending-content">
+                        <p style="color:#6E6E73;" id="generic-pending-loading-label">Chargement...</p>
+                    </div>
+                </div>
             </div>
         </div>
 
@@ -86,6 +92,11 @@
                 pendingTitle: "Demandes en attente",
                 pendingLoading: "Chargement...",
                 noPending: "<p>Aucune demande en attente.</p>",
+                genericPendingTitle: "Demandes génériques (sans défaut associé)",
+                noGenericPending: "<p>Aucune demande générique en attente.</p>",
+                ackButton: "Prise en charge",
+                ackSuccess: "Demande prise en charge.",
+                ackError: "Erreur lors de la prise en charge.",
                 historyTitle: "Interventions réalisées",
                 onDefaut: "sur le défaut",
                 outcomeResolved: "résolu",
@@ -105,6 +116,11 @@
                 pendingTitle: "Pending requests",
                 pendingLoading: "Loading...",
                 noPending: "<p>No pending request.</p>",
+                genericPendingTitle: "Generic requests (no associated fault)",
+                noGenericPending: "<p>No pending generic request.</p>",
+                ackButton: "Acknowledge",
+                ackSuccess: "Request acknowledged.",
+                ackError: "Error while acknowledging the request.",
                 historyTitle: "Completed interventions",
                 onDefaut: "on fault",
                 outcomeResolved: "resolved",
@@ -132,6 +148,8 @@
             document.getElementById('pending-toggle-label').innerText = t('pendingToggleLabel');
             document.getElementById('pending-title').innerText = t('pendingTitle');
             document.getElementById('pending-loading-label').innerText = t('pendingLoading');
+            document.getElementById('generic-pending-title').innerText = t('genericPendingTitle');
+            document.getElementById('generic-pending-loading-label').innerText = t('pendingLoading');
             document.getElementById('history-title').innerText = t('historyTitle');
             for (const cellId of [1, 2, 3]) {
                 const opt = document.querySelector(`#cell-filter option[value="${cellId}"]`);
@@ -209,9 +227,45 @@
                         container.innerHTML = t('noPending');
                     } else {
                         container.innerHTML = data.faults.map(f =>
-                            `<div class="history-item"><div class="history-item-main"><strong>${f.time}</strong> — ${cellDisplayName(f.cell_id)} — <span class="sev-${f.severity}">${f.type}</span><div style="color:#6E6E73;">${f.description}</div></div></div>`
+                            `<div class="history-item"><div class="history-item-main"><strong>${f.time}</strong> — ${cellDisplayName(f.cell_id)} — <span class="sev-${f.severity}">${translateFaultText(f.type)}</span><div style="color:#6E6E73;">${translateFaultText(f.description)}</div></div></div>`
                         ).join('');
                     }
+                }
+            } catch (e) { console.error(e); }
+        }
+
+        async function fetchGenericPending() {
+            try {
+                const response = await fetch('/api/status', {
+                    headers: { 'Authorization': `Bearer ${token}` },
+                });
+                const data = await response.json();
+                if (data.status !== 'ok') return;
+                const cellFilter = document.getElementById('cell-filter').value;
+                const entries = Object.entries(data.maint_requests || {})
+                    .filter(([cellId]) => !cellFilter || String(cellId) === String(cellFilter));
+                const container = document.getElementById('generic-pending-content');
+                if (entries.length === 0) {
+                    container.innerHTML = t('noGenericPending');
+                } else {
+                    container.innerHTML = entries.map(([cellId, username]) =>
+                        `<div class="history-item"><div class="history-item-main">${cellDisplayName(cellId)} — <em>(${t('requestedBy')} ${username})</em></div><button class="btn btn-intervene" onclick="acknowledgeGenericRequest(${cellId})">${t('ackButton')}</button></div>`
+                    ).join('');
+                }
+            } catch (e) { console.error(e); }
+        }
+
+        async function acknowledgeGenericRequest(cellId) {
+            try {
+                const response = await fetch(`/api/maintenance/acknowledge-request?cell_id=${cellId}`, {
+                    method: 'POST',
+                    headers: { 'Authorization': `Bearer ${token}` },
+                });
+                if (response.ok) {
+                    showModal(t('ackSuccess'), 'success');
+                    fetchAll();
+                } else {
+                    showModal(t('ackError'), 'error');
                 }
             } catch (e) { console.error(e); }
         }
@@ -219,6 +273,7 @@
         function fetchAll() {
             fetchHistory();
             fetchPending();
+            fetchGenericPending();
         }
 
         if (!token) {

@@ -14,10 +14,22 @@ sens NF EN 9100 (chapitre 8.1.2) — c'est celui-ci qui est persisté.
 from __future__ import annotations
 
 import os
-from datetime import UTC, datetime
+from datetime import datetime
 
 from sqlalchemy import event
 from sqlmodel import Field, Session, SQLModel, create_engine, select
+
+# Les horodatages métier (``horodatage`` sur toutes les tables ci-dessous)
+# sont enregistrés en heure LOCALE du serveur (datetime.now(), sans UTC),
+# volontairement : ce POC tourne sur un seul poste, dans un seul fuseau
+# horaire (celui de l'utilisateur), et un horodatage en UTC affiché tel quel
+# sur le dashboard était perçu comme "en retard de 2h" par rapport à
+# l'horloge réelle (été en France = UTC+2). Un vrai déploiement multi-site
+# nécessiterait de revoir ce choix (stocker en UTC + convertir à
+# l'affichage), mais ajouterait une complexité sans objet ici. Voir aussi
+# INC-V2-022. La date d'expiration des jetons JWT (security.py), elle,
+# reste volontairement en UTC : c'est une donnée de sécurité, pas un
+# horodatage affiché à l'utilisateur.
 
 DB_PATH = os.environ.get("SRC_DB_PATH", "smart_robotic_cell.db")
 DATABASE_URL = f"sqlite:///{DB_PATH}"
@@ -206,7 +218,7 @@ def add_history_entry(
     """
 
     entry = HistoriqueMaintenance(
-        horodatage=datetime.now(UTC).strftime("%Y-%m-%d %H:%M:%S"),
+        horodatage=datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
         action=action,
         username_auteur=username_auteur,
         cellule_id=cellule_id,
@@ -257,7 +269,7 @@ def add_axis_measure(
     """Ajoute et persiste un relevé pour un axe d'une cellule."""
 
     entry = MesureAxe(
-        horodatage=horodatage or datetime.now(UTC).strftime("%Y-%m-%d %H:%M:%S"),
+        horodatage=horodatage or datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
         cellule_id=cellule_id,
         axe=axe,
         temperature_c=temperature_c,
@@ -280,7 +292,7 @@ def add_cell_measure(
     """Ajoute et persiste un relevé des grandeurs globales d'une cellule."""
 
     entry = MesureCellule(
-        horodatage=horodatage or datetime.now(UTC).strftime("%Y-%m-%d %H:%M:%S"),
+        horodatage=horodatage or datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
         cellule_id=cellule_id,
         pneumatic_pressure_bar=pneumatic_pressure_bar,
         lubrix_level_pct=lubrix_level_pct,
@@ -332,7 +344,7 @@ def add_defaut(
     """Ajoute et persiste un défaut dans l'historique."""
 
     entry = DefautHistorique(
-        horodatage=horodatage or datetime.now(UTC).strftime("%Y-%m-%d %H:%M:%S"),
+        horodatage=horodatage or datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
         cellule_id=cellule_id,
         type_defaut=type_defaut,
         severite=severite,

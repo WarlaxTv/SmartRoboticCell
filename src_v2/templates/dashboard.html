@@ -83,6 +83,8 @@
                 signedIn: "Connecté",
                 requestMaintenance: "Demander une intervention Maintenance",
                 maintenanceRequested: "Intervention demandée à la maintenance.",
+                maintRequestPromptTitle: "Demande d'intervention",
+                maintRequestPromptPlaceholder: "Décrivez le problème (optionnel)...",
                 speed: "Vitesse de cycle :",
                 status: "Statut :",
                 error: "ERREUR :",
@@ -134,6 +136,8 @@
                 signedIn: "Signed in",
                 requestMaintenance: "Request Maintenance Intervention",
                 maintenanceRequested: "Maintenance intervention requested.",
+                maintRequestPromptTitle: "Intervention request",
+                maintRequestPromptPlaceholder: "Describe the issue (optional)...",
                 speed: "Cycle speed:",
                 status: "Status:",
                 error: "ERROR:",
@@ -510,9 +514,17 @@
             }
         }
 
-        async function callMaintenance(cellId) {
+        function callMaintenance(cellId) {
+            openTextPromptModal(t('maintRequestPromptTitle'), t('maintRequestPromptPlaceholder'), (message) => {
+                sendMaintenanceRequest(cellId, message);
+            });
+        }
+
+        async function sendMaintenanceRequest(cellId, message) {
             try {
-                const response = await fetch(`/api/maintenance/request?cell_id=${cellId}`, {
+                const params = new URLSearchParams({ cell_id: cellId });
+                if (message) params.set('message', message);
+                const response = await fetch(`/api/maintenance/request?${params.toString()}`, {
                     method: 'POST',
                     headers: { 'Authorization': `Bearer ${token}` }
                 });
