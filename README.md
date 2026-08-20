@@ -39,10 +39,23 @@ python generate_certs.py
 
 ## Architecture du projet
 
-- `src_v2/` : code source (Serveur Web FastAPI, client OPC UA, sécurité JWT/RBAC).
+- `src_v2/` : code source (Serveur Web FastAPI, client/serveur OPC UA, sécurité JWT/RBAC, persistance SQLite).
+- `src_v2/templates/` : pages HTML (vue principale, détail cellule, historiques, comparaison de données).
+- `src_v2/static/` : assets front-end partagés (thème, navigation, popups, Chart.js vendorisé en local).
 - `certs/` : certificats X.509 et clés privées générés localement.
 - `tests/` : tests unitaires (Pytest) pour valider la logique métier et la sécurité.
 - `docs_v2/` : documentation technique, conformité et journaux de traçabilité.
+- `seed_historical_data.py` : script optionnel générant un historique de démonstration (mesures, défauts) sans jamais toucher aux données réelles déjà produites par le serveur (voir `docs_v2/`).
+
+## Pages disponibles
+
+Une fois connecté, la navigation se fait via le menu déroulant en haut de chaque page :
+
+- `/` — Vue principale (les 3 cellules).
+- `/cell/{id}` — Détail d'une cellule (rôle MAINTENANCE) : diagnostics, historique des défauts et de maintenance, courbes par axe.
+- `/historique-maintenance` — Historique des interventions, toutes cellules (rôle MAINTENANCE).
+- `/historique-pannes` — Historique des défauts, toutes cellules, filtrable par cellule (rôle MAINTENANCE).
+- `/donnees` — Comparaison des 3 cellules (rôle MAINTENANCE).
 
 ## Lancement
 
@@ -99,3 +112,21 @@ python -m black .
 # Analyse statique PyLint (config projet)
 python -m pylint src_v2 --rcfile .\.pylintrc --score=y
 ```
+
+## Comptes de démonstration
+
+| Identifiant | Mot de passe | Rôle        |
+|-------------|---------------|-------------|
+| jean_ope    | ope123        | OPERATEUR   |
+| luc_maint   | maint123      | MAINTENANCE |
+
+## Données de démonstration (optionnel)
+
+Pour peupler la base d'un historique réaliste (3 semaines de mesures et de défauts) avant une démonstration :
+
+```powershell
+$env:SRC_DB_PATH = "smart_robotic_cell.db"
+python seed_historical_data.py
+```
+
+Le script est idempotent et non-destructif : relancé sur une base déjà peuplée (par la tâche de fond du serveur ou un lancement précédent), il ne duplique ni ne supprime jamais aucune donnée réelle.

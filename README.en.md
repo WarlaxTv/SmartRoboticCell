@@ -39,10 +39,23 @@ python generate_certs.py
 
 ## Project structure
 
-- `src_v2/` : source code (FastAPI web server, OPC UA client, JWT/RBAC security).
+- `src_v2/` : source code (FastAPI web server, OPC UA client/server, JWT/RBAC security, SQLite persistence).
+- `src_v2/templates/` : HTML pages (main view, cell detail, history pages, data comparison).
+- `src_v2/static/` : shared front-end assets (theme, navigation, popups, locally vendored Chart.js).
 - `certs/` : X.509 certificates and private keys generated locally.
 - `tests/` : unit tests (Pytest) to validate business logic and security.
 - `docs_v2/` : technical documentation, compliance and traceability logs.
+- `seed_historical_data.py` : optional script generating demo history (measures, faults) without ever touching real data already produced by the server (see `docs_v2/`).
+
+## Available pages
+
+Once logged in, navigation happens through the dropdown menu at the top of every page:
+
+- `/` — Main view (all 3 cells).
+- `/cell/{id}` — Cell detail (MAINTENANCE role): diagnostics, fault and maintenance history, per-axis charts.
+- `/historique-maintenance` — Maintenance intervention history, all cells (MAINTENANCE role).
+- `/historique-pannes` — Fault history, all cells, filterable by cell (MAINTENANCE role).
+- `/donnees` — 3-cell comparison (MAINTENANCE role).
 
 ## Running the application
 
@@ -106,3 +119,14 @@ python -m pylint src_v2 --rcfile .\.pylintrc --score=y
 |------------|-----------|-------------|
 | jean_ope   | ope123    | OPERATOR    |
 | luc_maint  | maint123  | MAINTENANCE |
+
+## Demo data (optional)
+
+To seed the database with a realistic history (3 weeks of measures and faults) before a demo:
+
+```powershell
+$env:SRC_DB_PATH = "smart_robotic_cell.db"
+python seed_historical_data.py
+```
+
+The script is idempotent and non-destructive: run again against an already-populated database (from the server's background task or a previous run), it never duplicates or deletes any real data.
