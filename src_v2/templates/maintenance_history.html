@@ -1,0 +1,100 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
+    <meta http-equiv="Pragma" content="no-cache" />
+    <meta http-equiv="Expires" content="0" />
+    <title>Historique Maintenance - Supervision NF EN 9100</title>
+    <link rel="stylesheet" href="/static/theme.css">
+</head>
+<body>
+    <div id="topnav-root"></div>
+
+    <div id="access-denied" class="access-denied-box hidden">
+        <h2 id="access-denied-title">Accès réservé</h2>
+        <p id="access-denied-body">Cette page est réservée au rôle MAINTENANCE.</p>
+        <a href="/" class="btn" id="access-denied-back">Retour au dashboard</a>
+    </div>
+
+    <main id="page-content" class="hidden">
+        <div class="header">
+            <h1 id="page-title">Historique des interventions Maintenance</h1>
+        </div>
+
+        <div class="history-panel">
+            <div id="history-content">
+                <p style="color:#6E6E73;" id="loading-label">Chargement de l'historique...</p>
+            </div>
+        </div>
+    </main>
+
+    <script src="/static/common.js"></script>
+    <script>
+        const I18N = {
+            fr: {
+                pageTitle: "Historique des interventions Maintenance",
+                loading: "Chargement de l'historique...",
+                noInterventions: "<p>Aucune intervention demandée.</p>",
+                requestedBy: "Demandé par",
+            },
+            en: {
+                pageTitle: "Maintenance Intervention History",
+                loading: "Loading history...",
+                noInterventions: "<p>No interventions requested.</p>",
+                requestedBy: "Requested by",
+            },
+        };
+
+        const token = localStorage.getItem('jwt_token');
+        const currentRole = localStorage.getItem('user_role');
+
+        function t(key) {
+            const lang = navLang();
+            return (I18N[lang] && I18N[lang][key]) || I18N.fr[key] || key;
+        }
+
+        function applyLanguage() {
+            document.title = t('pageTitle');
+            document.getElementById('page-title').innerText = t('pageTitle');
+            document.getElementById('loading-label').innerText = t('loading');
+            document.getElementById('access-denied-title').innerText = navT('accessDeniedTitle');
+            document.getElementById('access-denied-body').innerText = navT('accessDeniedBody');
+            document.getElementById('access-denied-back').innerText = navT('accessDeniedBack');
+            renderTopNav('maint-history', currentRole);
+        }
+
+        async function fetchHistory() {
+            try {
+                const response = await fetch('/api/maintenance/history', {
+                    headers: { 'Authorization': `Bearer ${token}` },
+                });
+                const data = await response.json();
+                if (data.status === 'ok') {
+                    const container = document.getElementById('history-content');
+                    if (data.history.length === 0) {
+                        container.innerHTML = t('noInterventions');
+                    } else {
+                        container.innerHTML = data.history.reverse().map(h =>
+                            `<div class="history-item"><strong>${h.time}</strong> : ${h.action} <em>(${t('requestedBy')} ${h.user})</em></div>`
+                        ).join('');
+                    }
+                }
+            } catch (e) { console.error(e); }
+        }
+
+        if (!token) {
+            window.location.href = '/';
+        } else if (currentRole !== 'MAINTENANCE') {
+            applyLanguage();
+            document.getElementById('access-denied').classList.remove('hidden');
+        } else {
+            applyLanguage();
+            document.getElementById('page-content').classList.remove('hidden');
+            fetchHistory();
+            setInterval(fetchHistory, 5000);
+        }
+    </script>
+</body>
+</html>
