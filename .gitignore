@@ -20,13 +20,18 @@ ENV/
 coverage.xml
 htmlcov/
 
-# Certificates (generated locally via generate_certs.py)
+# Certificates (generated locally via scripts/generate_certs.py)
 certs/
 
 # SQLite database (generated locally, not versioned — see src_v2/db.py)
 *.db
 *.db-journal
 smart_robotic_cell.db
+
+# Scratch folder used to work around a lock-file issue on this machine
+# (stale .git/*.lock files that git itself cannot delete on this mount) —
+# never meant to be tracked.
+_to_delete/
 
 # OS / IDE
 .DS_Store

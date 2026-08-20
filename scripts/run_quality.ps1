@@ -1,4 +1,5 @@
 $ErrorActionPreference = "Stop"
+Set-Location (Split-Path -Parent $PSScriptRoot)
 
 Write-Host "[SRC] Running unit tests..." -ForegroundColor Cyan
 python -m pytest

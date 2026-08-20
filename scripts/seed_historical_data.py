@@ -17,8 +17,8 @@ plus jamais. Il ne fait que :
     marqueur SEED_MARKER dans la description), sans jamais toucher un défaut
     réellement déclenché depuis le panneau de simulation.
 
-Usage :
-    SRC_DB_PATH=/chemin/vers/copie.db python seed_historical_data.py
+Usage (depuis la racine du dépôt) :
+    SRC_DB_PATH=/chemin/vers/copie.db python scripts/seed_historical_data.py
 """
 
 from __future__ import annotations
@@ -32,7 +32,10 @@ if "SRC_DB_PATH" not in os.environ:
     print("SRC_DB_PATH doit être défini (copie du .db réel), abandon.", file=sys.stderr)
     sys.exit(1)
 
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+# Le script vit maintenant dans scripts/ : on remonte d'un niveau pour
+# retrouver la racine du dépôt (où se trouve le paquet src_v2), quel que
+# soit le répertoire courant depuis lequel il est lancé.
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from src_v2 import db  # noqa: E402  (import après réglage de SRC_DB_PATH)
 

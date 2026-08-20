@@ -12,7 +12,7 @@ Bienvenue dans la version 2 du projet. Cette version a été reconstruite de zé
 ### Prérequis
 
 - Python 3.12+
-- Windows PowerShell (pour les scripts `run_servers.ps1` / `run_quality.ps1`)
+- Windows PowerShell (pour les scripts `scripts/run_servers.ps1` / `scripts/run_quality.ps1`)
 
 ### Installation (portable)
 
@@ -34,7 +34,7 @@ Le projet utilise des certificats auto-signés pour :
 Génération des certificats (stockés dans `certs/`) :
 
 ```powershell
-python generate_certs.py
+python scripts/generate_certs.py
 ```
 
 ## Architecture du projet
@@ -42,10 +42,10 @@ python generate_certs.py
 - `src_v2/` : code source (Serveur Web FastAPI, client/serveur OPC UA, sécurité JWT/RBAC, persistance SQLite).
 - `src_v2/templates/` : pages HTML (vue principale, détail cellule, historiques, comparaison de données).
 - `src_v2/static/` : assets front-end partagés (thème, navigation, popups, Chart.js vendorisé en local).
+- `scripts/` : scripts PowerShell/Python ponctuels (génération de certificats, démo/qualité "one-click", jeu de données historique, tests de charge) — voir sections ci-dessous.
 - `certs/` : certificats X.509 et clés privées générés localement.
 - `tests/` : tests unitaires (Pytest) pour valider la logique métier et la sécurité.
 - `docs_v2/` : documentation technique, conformité et journaux de traçabilité.
-- `seed_historical_data.py` : script optionnel générant un historique de démonstration (mesures, défauts) sans jamais toucher aux données réelles déjà produites par le serveur (voir `docs_v2/`).
 
 ## Pages disponibles
 
@@ -63,10 +63,10 @@ Une fois connecté, la navigation se fait via le menu déroulant en haut de chaq
 
 ```powershell
 # Lance les deux serveurs (OPC UA + Web) + génère les certs si besoin
-./run_servers.ps1
+./scripts/run_servers.ps1
 
 # Lance les preuves qualité (tests, coverage, lint, format)
-./run_quality.ps1
+./scripts/run_quality.ps1
 ```
 
 Ensuite, ouvre le dashboard :
@@ -113,6 +113,15 @@ python -m black .
 python -m pylint src_v2 --rcfile .\.pylintrc --score=y
 ```
 
+## Tests de charge (Locust)
+
+```powershell
+python -m pip install locust
+locust -f scripts/locustfile.py --host=https://127.0.0.1:8082
+```
+
+Ouvre ensuite http://localhost:8089 pour piloter la simulation (nombre d'utilisateurs, montée en charge).
+
 ## Comptes de démonstration
 
 | Identifiant | Mot de passe | Rôle        |
@@ -126,7 +135,7 @@ Pour peupler la base d'un historique réaliste (3 semaines de mesures et de déf
 
 ```powershell
 $env:SRC_DB_PATH = "smart_robotic_cell.db"
-python seed_historical_data.py
+python scripts/seed_historical_data.py
 ```
 
 Le script est idempotent et non-destructif : relancé sur une base déjà peuplée (par la tâche de fond du serveur ou un lancement précédent), il ne duplique ni ne supprime jamais aucune donnée réelle.

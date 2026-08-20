@@ -17,3 +17,5 @@ black
 
 asyncua
 cryptography
+
+locust

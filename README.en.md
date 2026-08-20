@@ -12,7 +12,7 @@ Welcome to the project. This application was built from scratch to address new i
 ### Prerequisites
 
 - Python 3.12+
-- Windows PowerShell (for `run_servers.ps1` / `run_quality.ps1`)
+- Windows PowerShell (for `scripts/run_servers.ps1` / `scripts/run_quality.ps1`)
 
 ### Installation (portable)
 
@@ -34,7 +34,7 @@ The project uses self-signed certificates for:
 Generate certificates (stored in `certs/`):
 
 ```powershell
-python generate_certs.py
+python scripts/generate_certs.py
 ```
 
 ## Project structure
@@ -42,10 +42,10 @@ python generate_certs.py
 - `src_v2/` : source code (FastAPI web server, OPC UA client/server, JWT/RBAC security, SQLite persistence).
 - `src_v2/templates/` : HTML pages (main view, cell detail, history pages, data comparison).
 - `src_v2/static/` : shared front-end assets (theme, navigation, popups, locally vendored Chart.js).
+- `scripts/` : one-off PowerShell/Python scripts (certificate generation, one-click demo/quality run, historical demo data, load testing) — see sections below.
 - `certs/` : X.509 certificates and private keys generated locally.
 - `tests/` : unit tests (Pytest) to validate business logic and security.
 - `docs_v2/` : technical documentation, compliance and traceability logs.
-- `seed_historical_data.py` : optional script generating demo history (measures, faults) without ever touching real data already produced by the server (see `docs_v2/`).
 
 ## Available pages
 
@@ -63,10 +63,10 @@ Once logged in, navigation happens through the dropdown menu at the top of every
 
 ```powershell
 # Start both servers (OPC UA + Web) + generate certs if needed
-./run_servers.ps1
+./scripts/run_servers.ps1
 
 # Run quality checks (tests, coverage, lint, format)
-./run_quality.ps1
+./scripts/run_quality.ps1
 ```
 
 Then open the dashboard:
@@ -113,6 +113,15 @@ python -m black .
 python -m pylint src_v2 --rcfile .\.pylintrc --score=y
 ```
 
+## Load testing (Locust)
+
+```powershell
+python -m pip install locust
+locust -f scripts/locustfile.py --host=https://127.0.0.1:8082
+```
+
+Then open http://localhost:8089 to drive the simulation (user count, ramp-up).
+
 ## Demo accounts
 
 | Username   | Password  | Role        |
@@ -126,7 +135,7 @@ To seed the database with a realistic history (3 weeks of measures and faults) b
 
 ```powershell
 $env:SRC_DB_PATH = "smart_robotic_cell.db"
-python seed_historical_data.py
+python scripts/seed_historical_data.py
 ```
 
 The script is idempotent and non-destructive: run again against an already-populated database (from the server's background task or a previous run), it never duplicates or deletes any real data.
