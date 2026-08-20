@@ -11,15 +11,25 @@ output-format=text
 # - FastAPI dependency injection often creates parameters that are not referenced directly.
 # - The OPC UA server is a simulation loop (OT side) where splitting into many functions
 #   is possible but not always useful for a POC.
+# - broad-exception-caught: la couche OT (opcua_client.py, opcua_server.py) et la
+#   tâche de fond d'échantillonnage (web_server.py) dialoguent avec un serveur OPC UA
+#   / des fichiers externes potentiellement indisponibles ; ces except Exception sont
+#   un choix de résilience volontaire et documenté (log + valeur par défaut), pas un
+#   oubli — plutôt que de lister un à un les types d'erreurs réseau/IO possibles.
 disable=
     missing-module-docstring,
     missing-function-docstring,
     unused-argument,
     too-many-locals,
     too-many-statements,
+    broad-exception-caught,
 
 [DESIGN]
-# Keep defaults for most design rules; we already disable a few above.
+# Les fonctions d'écriture en base (db.py) prennent volontairement un paramètre par
+# colonne persistée (ex: add_axis_measure -> 7 args) plutôt que des dicts non typés :
+# on autorise un peu plus que la valeur par défaut (5) au lieu de désactiver le check.
+max-args=8
+max-positional-arguments=8
 
 [FORMAT]
 max-line-length=88

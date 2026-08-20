@@ -57,6 +57,7 @@ def verify_password(plain_password: str, hashed_password: str) -> bool:
     except (ValueError, TypeError):
         return False
 
+
 def create_access_token(
     data: dict[str, Any],
     expires_delta: timedelta | None = None,
@@ -67,6 +68,7 @@ def create_access_token(
     expire = datetime.now(UTC) + (expires_delta or timedelta(minutes=15))
     to_encode.update({"exp": expire})
     return jwt.encode(to_encode, get_secret_key(), algorithm=ALGORITHM)
+
 
 async def get_current_user(
     token: str = Depends(oauth2_scheme),
@@ -91,6 +93,7 @@ async def get_current_user(
         raise credentials_exception
     return {"username": username, "role": role}
 
+
 def require_role(required_role: str) -> Callable[[dict[str, str]], dict[str, str]]:
     """FastAPI dependency enforcing a specific role."""
 
@@ -103,4 +106,5 @@ def require_role(required_role: str) -> Callable[[dict[str, str]], dict[str, str
                 detail="Rôle insuffisant pour cette action",
             )
         return current_user
+
     return role_checker
