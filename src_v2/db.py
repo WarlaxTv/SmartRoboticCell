@@ -65,6 +65,37 @@ class Utilisateur(SQLModel, table=True):
     role: str
 
 
+# Rôles pouvant être créés depuis la page d'administration (cf. demande
+# utilisateur "un compte administrateur, où on peut créer des comptes
+# (opérateur ou maintenance)"). Volontairement sans ADMIN : la création d'un
+# second compte Administrateur n'a pas été demandée explicitement, et
+# l'exposer sans confirmation créerait un risque de sécurité non désiré
+# (cf. journal des décisions, CHG-V2-088) — un besoin réel pourrait être
+# ajouté plus tard sur confirmation explicite de l'utilisateur.
+CREATABLE_ROLES = ("OPERATEUR", "MAINTENANCE")
+
+
+class Cellule(SQLModel, table=True):
+    """Une cellule robotique existante dans l'usine simulée.
+
+    Source de vérité partagée entre les deux processus indépendants de
+    l'application : web_server.py (API/dashboard) et opcua_server.py (qui
+    crée les noeuds OPC UA correspondants au démarrage). Auparavant les 3
+    cellules étaient codées en dur (range(1, 4)) dans les deux fichiers ;
+    cette table permet à l'Administrateur d'en ajouter de nouvelles sans
+    modifier le code (cf. demande utilisateur "que l'on puisse créer des
+    nouvelles cellules de robots", et décision utilisateur CHG-V2-088 :
+    "Ajout en base + redémarrage simulateur" — la nouvelle cellule n'est
+    prise en compte par le simulateur OPC UA qu'à son prochain démarrage,
+    pas à chaud).
+    """
+
+    id: int | None = Field(default=None, primary_key=True)
+    nom: str
+    type_robot: str
+    adresse_ip: str
+
+
 class HistoriqueMaintenance(SQLModel, table=True):
     """Une ligne = une action tracée (demande ou intervention de maintenance).
 
@@ -177,11 +208,50 @@ _SEED_USERS = [
         "password_hash": "$2b$12$Ly00nWgwH5s0iKXBCNSv5uI/cBTGpK7qU.P7vhUBOzg7hyo.b2ZjG",
         "role": "MAINTENANCE",
     },
+    # Compte ADMIN d'amorçage : sans lui, personne ne pourrait jamais se
+    # connecter en ADMIN pour créer les premiers comptes Opérateur/Maintenance
+    # (la page /administration elle-même exige déjà un compte ADMIN pour y
+    # accéder). Mot de passe "admin123", volontairement au même niveau de
+    # simplicité que les comptes de démo ci-dessus (cf. CHG-V2-088) — à
+    # changer en priorité, ce compte ayant tous les droits (cf. décision
+    # utilisateur "Admin = tous les droits"). Aucun mécanisme de changement de
+    # mot de passe n'existe encore dans l'application (hors accès direct à la
+    # base) : à prévoir si ce compte doit être sécurisé au-delà d'un POC.
+    {
+        "username": "admin",
+        "password_hash": "$2b$12$uWUasIg2mRQFc5CmKxOrceztQ16xvfIPUH08tvhWnnvFyqFSH.XFe",
+        "role": "ADMIN",
+    },
+]
+
+
+# Cellules par défaut, correspondant exactement aux 3 cellules jusque-là
+# codées en dur dans opcua_server.py/opcua_client.py (mêmes id, noms, types
+# et adresses IP) : nécessaire pour la continuité avec les mesures/historiques
+# déjà en base (MesureAxe, MesureCellule, DefautHistorique, HistoriqueMaintenance
+# référencent ces cellule_id 1/2/3 par convention, sans clé étrangère
+# explicite — cf. commentaire de MesureAxe).
+_SEED_CELLULES = [
+    {
+        "nom": "PERÇAGE AÉRO",
+        "type_robot": "ROBOT KUKA KR210",
+        "adresse_ip": "192.168.1.10",
+    },
+    {
+        "nom": "ASSEMBLAGE",
+        "type_robot": "ROBOT KUKA KR210",
+        "adresse_ip": "192.168.1.20",
+    },
+    {
+        "nom": "CONTRÔLE QUALITÉ",
+        "type_robot": "ROBOT KUKA KR210",
+        "adresse_ip": "192.168.1.30",
+    },
 ]
 
 
 def init_db() -> None:
-    """Crée les tables si nécessaire et amorce les comptes de démo.
+    """Crée les tables si nécessaire et amorce les comptes/cellules de démo.
 
     Idempotent : peut être appelée à chaque démarrage (module-level, y
     compris sous pytest/TestClient) sans dupliquer les données.
@@ -190,8 +260,28 @@ def init_db() -> None:
     SQLModel.metadata.create_all(engine)
     with Session(engine) as session:
         if session.exec(select(Utilisateur)).first() is None:
+            # Base tout juste créée (premier lancement) : amorce les 3
+            # comptes de démo (Opérateur, Maintenance, Admin) d'un coup.
             for user in _SEED_USERS:
                 session.add(Utilisateur(**user))
+            session.commit()
+        elif (
+            session.exec(select(Utilisateur).where(Utilisateur.role == "ADMIN")).first()
+            is None
+        ):
+            # Base déjà existante (utilisateurs Opérateur/Maintenance créés
+            # avant l'ajout du rôle ADMIN, cf. CHG-V2-088) mais sans compte
+            # ADMIN : sans ce cas particulier, personne ne pourrait jamais se
+            # connecter en ADMIN sur une installation existante, puisque la
+            # condition ci-dessus (table vide) ne serait alors plus jamais
+            # vraie. On amorce uniquement le compte "admin" par défaut, sans
+            # toucher aux comptes existants.
+            admin_seed = next(u for u in _SEED_USERS if u["role"] == "ADMIN")
+            session.add(Utilisateur(**admin_seed))
+            session.commit()
+        if session.exec(select(Cellule)).first() is None:
+            for cellule in _SEED_CELLULES:
+                session.add(Cellule(**cellule))
             session.commit()
 
 
@@ -206,6 +296,69 @@ def get_user(session: Session, username: str) -> Utilisateur | None:
     """Recherche un utilisateur par son identifiant."""
 
     return session.get(Utilisateur, username)
+
+
+def list_users(session: Session) -> list[Utilisateur]:
+    """Retourne tous les comptes utilisateurs, triés par identifiant.
+
+    Utilisé par la page d'administration pour afficher la liste des comptes
+    existants. Ne retourne jamais ``password_hash`` au client (filtré côté
+    web_server.py, pas ici) : cette fonction reste une lecture brute de la
+    table.
+    """
+
+    return list(session.exec(select(Utilisateur).order_by(Utilisateur.username)))
+
+
+def create_user(
+    session: Session, username: str, password_hash: str, role: str
+) -> Utilisateur:
+    """Crée un nouveau compte utilisateur (Opérateur ou Maintenance).
+
+    Lève ValueError si le nom d'utilisateur est déjà pris : web_server.py
+    traduit ceci en 409. La validation du rôle (parmi CREATABLE_ROLES) est
+    la responsabilité de l'appelant (couche contrôleur), pas de cette
+    fonction de persistance.
+    """
+
+    if get_user(session, username) is not None:
+        raise ValueError(f"Le compte « {username} » existe déjà")
+
+    user = Utilisateur(username=username, password_hash=password_hash, role=role)
+    session.add(user)
+    session.commit()
+    session.refresh(user)
+    return user
+
+
+def list_cellules(session: Session) -> list[Cellule]:
+    """Retourne toutes les cellules existantes, triées par id.
+
+    Source de vérité unique consommée par web_server.py (pour savoir quelles
+    cellules interroger via OPC UA) et par opcua_server.py (pour savoir
+    quels noeuds créer au démarrage) — remplace les ``range(1, 4)`` codés en
+    dur dans les deux fichiers.
+    """
+
+    return list(session.exec(select(Cellule).order_by(Cellule.id)))
+
+
+def add_cellule(
+    session: Session, nom: str, type_robot: str, adresse_ip: str
+) -> Cellule:
+    """Ajoute une nouvelle cellule robotique.
+
+    N'a aucun effet sur le serveur OPC UA en cours d'exécution (cf. décision
+    utilisateur CHG-V2-088 : "Ajout en base + redémarrage simulateur") — la
+    nouvelle cellule n'apparaîtra dans le dashboard qu'après redémarrage de
+    ``opcua_server.py``, qui relit cette table à son démarrage.
+    """
+
+    cellule = Cellule(nom=nom, type_robot=type_robot, adresse_ip=adresse_ip)
+    session.add(cellule)
+    session.commit()
+    session.refresh(cellule)
+    return cellule
 
 
 def add_history_entry(

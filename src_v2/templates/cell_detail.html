@@ -509,7 +509,7 @@
         }
 
         async function loadMeasures() {
-            if (currentRole !== 'MAINTENANCE' && currentRole !== 'OPERATEUR') return;
+            if (!hasPageAccess(currentRole)) return;
             const hours = document.getElementById('range-select').value;
             try {
                 const resp = await fetch(`/api/cell/${cellId}/measures?hours=${hours}`, {
@@ -553,7 +553,7 @@
         }
 
         async function loadLiveAxes() {
-            if (currentRole !== 'MAINTENANCE' && currentRole !== 'OPERATEUR') return;
+            if (!hasPageAccess(currentRole)) return;
             try {
                 const resp = await fetch(`/api/cell/${cellId}/axes`, {
                     headers: { 'Authorization': `Bearer ${token}` },
@@ -580,7 +580,7 @@
         // panneau "Informations générales" se concentre sur les problèmes
         // actifs et le signalement d'anomalie.
         async function loadAdvancedDiagnostics() {
-            if (currentRole !== 'MAINTENANCE' && currentRole !== 'OPERATEUR') return;
+            if (!hasPageAccess(currentRole)) return;
             try {
                 const resp = await fetch('/api/status', {
                     headers: { 'Authorization': `Bearer ${token}` },
@@ -618,7 +618,7 @@
                         <span class="${faultStatusTagClass(f.fault_status)}">(${statusLabel(f.fault_status)})</span>
                         <div style="color:#6E6E73;">${translateFaultText(f.description)}</div>
                     </div>
-                    ${currentRole === 'MAINTENANCE' ? `<button class="btn btn-intervene" onclick="openInterventionModal(${f.id})">${t('intervene')}</button>` : ''}
+                    ${hasMaintenanceRights(currentRole) ? `<button class="btn btn-intervene" onclick="openInterventionModal(${f.id})">${t('intervene')}</button>` : ''}
                 </div>
             `).join('');
             block.innerHTML = `<p style="font-weight:600; margin:0 0 6px 0;">${t('activeIssuesTitle')}</p>${items}`;
@@ -642,7 +642,7 @@
             const message = requestInfo.message
                 ? `<div style="color:#6E6E73;">${t('requestMessage')} : ${requestInfo.message}</div>`
                 : '';
-            const ackBtn = currentRole === 'MAINTENANCE'
+            const ackBtn = hasMaintenanceRights(currentRole)
                 ? `<button class="btn btn-intervene" onclick="openGenericAckPrompt()">${t('ackButton')}</button>`
                 : '';
             block.innerHTML = `
@@ -728,7 +728,7 @@
         }
 
         async function loadFaults() {
-            if (currentRole !== 'MAINTENANCE' && currentRole !== 'OPERATEUR') return;
+            if (!hasPageAccess(currentRole)) return;
             try {
                 const resp = await fetch(`/api/faults/history?cell_id=${cellId}`, {
                     headers: { 'Authorization': `Bearer ${token}` },
@@ -794,7 +794,7 @@
         }
 
         async function loadMaintenanceHistory() {
-            if (currentRole !== 'MAINTENANCE' && currentRole !== 'OPERATEUR') return;
+            if (!hasPageAccess(currentRole)) return;
             try {
                 const resp = await fetch(`/api/maintenance/history?cell_id=${cellId}`, {
                     headers: { 'Authorization': `Bearer ${token}` },
@@ -820,12 +820,12 @@
         // restent réservées à la Maintenance — cf. gates ciblées plus bas
         // (report-issue-btn masqué, boutons "Intervenir"/"Prise en charge"
         // non générés pour l'Opérateur).
-        if (currentRole !== 'MAINTENANCE' && currentRole !== 'OPERATEUR') {
+        if (!hasPageAccess(currentRole)) {
             applyLanguage();
             document.getElementById('access-denied').classList.remove('hidden');
         } else {
             applyLanguage();
-            if (currentRole !== 'MAINTENANCE') {
+            if (!hasMaintenanceRights(currentRole)) {
                 document.getElementById('report-issue-btn').classList.add('hidden');
                 // Téléchargement d'image de courbe réservé à la Maintenance
                 // ("la seule chose que l'opérateur ne peut pas faire c'est

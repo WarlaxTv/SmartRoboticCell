@@ -28,6 +28,7 @@ from src_v2.security import (
     ACCESS_TOKEN_EXPIRE_MINUTES,
     create_access_token,
     get_current_user,
+    hash_password,
     require_role,
     verify_password,
 )
@@ -129,7 +130,9 @@ async def _sampling_loop() -> None:
 
     while True:
         try:
-            cells = await fetch_opcua_data()
+            with Session(db.engine) as id_session:
+                cell_ids = [c.id for c in db.list_cellules(id_session)]
+            cells = await fetch_opcua_data(cell_ids)
             with Session(db.engine) as session:
                 for cell in cells:
                     db.add_cell_measure(
@@ -260,8 +263,21 @@ async def read_fault_history_page(request: Request):
 
 @app.get("/donnees", response_class=HTMLResponse)
 async def read_data_comparison_page(request: Request):
-    """Serve la page de comparaison des données entre les 3 cellules."""
+    """Serve la page de comparaison des données entre les cellules."""
     return _html_page(request, "data_comparison.html")
+
+
+@app.get("/administration", response_class=HTMLResponse)
+async def read_administration_page(request: Request):
+    """Serve la page d'administration (comptes, cellules).
+
+    Réservée au rôle ADMIN — le contrôle d'accès réel est fait côté client
+    (comme les autres pages du site, cf. accessDeniedTitle/accessDeniedBody
+    dans common.js) ET côté serveur sur chaque endpoint /api/admin/* via
+    require_role("ADMIN") : servir la page HTML elle-même à un rôle non-admin
+    n'expose aucune donnée, seuls les appels API le feraient.
+    """
+    return _html_page(request, "admin.html")
 
 
 @app.post("/token")
@@ -294,7 +310,8 @@ async def get_status(
     session: Session = Depends(get_session),
 ):
     """API sécurisée renvoyant l'état des cellules depuis OPC UA"""
-    data = await fetch_opcua_data()
+    cell_ids = [c.id for c in db.list_cellules(session)]
+    data = await fetch_opcua_data(cell_ids)
     return {
         "status": "ok",
         "cells": data,
@@ -302,6 +319,104 @@ async def get_status(
         "maint_requests": active_maintenance_requests,
         "active_issues": _active_issues_by_cell(session),
         "ssl_cert_expiry": SSL_CERT_EXPIRY,
+    }
+
+
+@app.get("/api/cells")
+async def get_cells(
+    current_user: dict = Depends(get_current_user),
+    session: Session = Depends(get_session),
+):
+    """Retourne la liste des cellules existantes (id + nom).
+
+    Ouvert à tout rôle authentifié (pas seulement ADMIN) : c'est la source
+    utilisée par common.js::loadCellNames() pour afficher le nom des
+    cellules (dashboard, historiques, page de données) — un besoin partagé
+    par tous les rôles, distinct de la gestion des cellules elle-même
+    (POST /api/admin/cells, réservé à ADMIN).
+    """
+    cellules = db.list_cellules(session)
+    return {"status": "ok", "cells": [{"id": c.id, "nom": c.nom} for c in cellules]}
+
+
+@app.get("/api/admin/users")
+async def get_admin_users(
+    current_user: dict = Depends(require_role("ADMIN")),
+    session: Session = Depends(get_session),
+):
+    """Liste les comptes utilisateurs existants (sans les hashs de mot de passe)."""
+    users = db.list_users(session)
+    return {
+        "status": "ok",
+        "users": [{"username": u.username, "role": u.role} for u in users],
+    }
+
+
+@app.post("/api/admin/users")
+async def create_admin_user(
+    payload: dict,
+    current_user: dict = Depends(require_role("ADMIN")),
+    session: Session = Depends(get_session),
+):
+    """Crée un nouveau compte Opérateur ou Maintenance.
+
+    Réservé à ADMIN (cf. demande utilisateur "un compte administrateur, où
+    on peut créer des comptes (opérateur ou maintenance)"). Le rôle ADMIN
+    lui-même n'est volontairement pas dans les rôles créables (cf.
+    db.CREATABLE_ROLES) : voir CHG-V2-088 dans le journal des décisions.
+    """
+    username = (payload.get("username") or "").strip()
+    password = payload.get("password") or ""
+    role = payload.get("role") or ""
+
+    if not username or not password:
+        raise HTTPException(
+            status_code=422, detail="Identifiant et mot de passe requis"
+        )
+    if role not in db.CREATABLE_ROLES:
+        raise HTTPException(
+            status_code=422,
+            detail=f"Rôle invalide (attendu : {', '.join(db.CREATABLE_ROLES)})",
+        )
+
+    try:
+        user = db.create_user(session, username, hash_password(password), role)
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+    return {"status": "ok", "username": user.username, "role": user.role}
+
+
+@app.post("/api/admin/cells")
+async def create_admin_cell(
+    payload: dict,
+    current_user: dict = Depends(require_role("ADMIN")),
+    session: Session = Depends(get_session),
+):
+    """Crée une nouvelle cellule robotique.
+
+    N'a d'effet visible qu'après redémarrage de opcua_server.py (cf.
+    décision utilisateur CHG-V2-088 : "Ajout en base + redémarrage
+    simulateur") — la cellule est ajoutée en base immédiatement, mais le
+    simulateur OPC UA (processus séparé) ne crée ses noeuds qu'à son
+    démarrage. Le frontend affiche cette information à l'utilisateur.
+    """
+    nom = (payload.get("nom") or "").strip()
+    type_robot = (payload.get("type_robot") or "").strip()
+    adresse_ip = (payload.get("adresse_ip") or "").strip()
+
+    if not nom or not type_robot or not adresse_ip:
+        raise HTTPException(
+            status_code=422, detail="Nom, type de robot et adresse IP requis"
+        )
+
+    cellule = db.add_cellule(session, nom, type_robot, adresse_ip)
+    return {
+        "status": "ok",
+        "id": cellule.id,
+        "nom": cellule.nom,
+        "type_robot": cellule.type_robot,
+        "adresse_ip": cellule.adresse_ip,
     }
 
 

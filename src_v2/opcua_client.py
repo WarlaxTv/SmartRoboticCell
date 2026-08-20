@@ -89,10 +89,18 @@ async def _read_optional_group(
         return dict.fromkeys(fields, 0.0)
 
 
-async def fetch_opcua_data() -> list[dict[str, Any]]:
-    """Fetch cell states from the OPC UA server.
+async def fetch_opcua_data(cell_ids: list[int]) -> list[dict[str, Any]]:
+    """Fetch cell states from the OPC UA server, for the given cell ids.
 
-    Returns an empty list on connection errors.
+    ``cell_ids`` vient de la table Cellule (base de données), plus large que
+    les 3 cellules d'origine désormais que l'Administrateur peut en créer de
+    nouvelles (cf. CHG-V2-088). Contrairement à l'ancienne version (une seule
+    boucle try/except globale), une erreur sur UNE cellule (ex. cellule
+    ajoutée en base mais dont le simulateur OPC UA n'a pas encore été
+    redémarré, donc dont le noeud n'existe pas encore côté serveur OPC UA)
+    est ignorée pour cette cellule uniquement — les autres cellules restent
+    disponibles. Ce n'est que la connexion elle-même (client OPC UA
+    inaccessible) qui fait retourner une liste vide, comme avant.
     """
 
     try:
@@ -103,19 +111,28 @@ async def fetch_opcua_data() -> list[dict[str, Any]]:
             )
 
             cells_data: list[dict[str, Any]] = []
-            for i in range(1, 4):
-                cell_node = await supervision_node.get_child(
-                    f"{idx}:CelluleRobotique_{i}"
-                )
+            for i in cell_ids:
+                try:
+                    cell_node = await supervision_node.get_child(
+                        f"{idx}:CelluleRobotique_{i}"
+                    )
 
-                values: dict[str, Any] = {
-                    key: await _read_node_value(cell_node, idx, name)
-                    for key, name in CELL_NODE_FIELDS.items()
-                }
-                for group in OPTIONAL_DIAGNOSTIC_GROUPS:
-                    values.update(await _read_optional_group(cell_node, idx, group, i))
+                    values: dict[str, Any] = {
+                        key: await _read_node_value(cell_node, idx, name)
+                        for key, name in CELL_NODE_FIELDS.items()
+                    }
+                    for group in OPTIONAL_DIAGNOSTIC_GROUPS:
+                        values.update(
+                            await _read_optional_group(cell_node, idx, group, i)
+                        )
 
-                cells_data.append({"id": i, **values})
+                    cells_data.append({"id": i, **values})
+                except Exception:
+                    LOGGER.warning(
+                        "Cell %s not found on OPC UA server (simulator restart "
+                        "may be required after cell creation) — skipped",
+                        i,
+                    )
 
             return cells_data
     except Exception:

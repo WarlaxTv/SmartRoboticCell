@@ -58,6 +58,21 @@ def verify_password(plain_password: str, hashed_password: str) -> bool:
         return False
 
 
+def hash_password(plain_password: str) -> str:
+    """Hash a plaintext password with bcrypt.
+
+    Utilisé uniquement par le point de création de compte de la page
+    d'administration (POST /api/admin/users) : le mot de passe choisi par
+    l'Administrateur pour un nouveau compte Opérateur/Maintenance ne doit
+    jamais être stocké en clair, au même titre que les comptes de démo
+    (cf. _SEED_USERS dans db.py, déjà des hashs bcrypt).
+    """
+
+    return bcrypt.hashpw(plain_password.encode("utf-8"), bcrypt.gensalt()).decode(
+        "utf-8"
+    )
+
+
 def create_access_token(
     data: dict[str, Any],
     expires_delta: timedelta | None = None,
@@ -103,12 +118,20 @@ def require_role(
     "OPERATEUR")``) pour les endpoints en lecture partagée entre les deux
     rôles (ex. historique des défauts), tout en gardant la forme à un seul
     argument pour les endpoints strictement réservés à un rôle.
+
+    ADMIN passe systématiquement, quels que soient les ``allowed_roles``
+    demandés (cf. décision utilisateur : "Admin = tous les droits") — un
+    seul point de bypass ici évite de devoir ajouter "ADMIN" à chacun des
+    appels ``require_role(...)`` existants (et futurs) dans web_server.py.
     """
 
     def role_checker(
         current_user: dict[str, str] = Depends(get_current_user),
     ) -> dict[str, str]:
-        if current_user["role"] not in allowed_roles:
+        if (
+            current_user["role"] != "ADMIN"
+            and current_user["role"] not in allowed_roles
+        ):
             raise HTTPException(
                 status_code=403,
                 detail="Rôle insuffisant pour cette action",

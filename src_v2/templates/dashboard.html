@@ -454,7 +454,7 @@
                         // Boutons d'action pour la Maintenance directement sur la carte
                         let maintActionHtml = '';
                         let diagHtml = '';
-                        if (currentRole === "MAINTENANCE") {
+                        if (hasMaintenanceRights(currentRole)) {
                             // Le détail par axe (température/vibration) est réservé à
                             // la page /cell/{id} : sur la vue principale, une carte par
                             // cellule ne doit garder que l'essentiel (statut, alarmes,
@@ -544,7 +544,7 @@
                     
                     // Affichage de la bannière d'alerte pour la maintenance
                     const alertBanner = document.getElementById('maint-alerts-banner');
-                    if (currentRole === "MAINTENANCE" && maintAlerts.length > 0) {
+                    if (hasMaintenanceRights(currentRole) && maintAlerts.length > 0) {
                         alertBanner.innerHTML = maintAlerts.join('<br>');
                         alertBanner.classList.remove('hidden');
                     } else {
@@ -575,7 +575,7 @@
         }
 
         async function simuAction(cellId, action) {
-            if (currentRole !== "MAINTENANCE") {
+            if (!hasMaintenanceRights(currentRole)) {
                 showModal(t('restrictedMaintenance'), 'error');
                 return;
             }

@@ -1,0 +1,297 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
+    <meta http-equiv="Pragma" content="no-cache" />
+    <meta http-equiv="Expires" content="0" />
+    <title>Administration - Supervision NF EN 9100</title>
+    <link rel="stylesheet" href="{{ static_v('theme.css') }}">
+</head>
+<body>
+    <div id="topnav-root"></div>
+
+    <div id="access-denied" class="access-denied-box hidden">
+        <h2 id="access-denied-title">Accès réservé</h2>
+        <p id="access-denied-body">Cette page est réservée au rôle ADMIN.</p>
+        <a href="/" class="btn" id="access-denied-back">Retour au dashboard</a>
+    </div>
+
+    <main id="page-content" class="hidden">
+        <div class="header">
+            <h1 id="page-title">Administration</h1>
+        </div>
+
+        <div class="admin-grid">
+            <div class="card">
+                <h2 id="users-section-title" class="admin-section-title">Comptes utilisateurs</h2>
+
+                <form id="user-form" onsubmit="return false;">
+                    <div class="form-field">
+                        <label for="user-username" id="user-username-label">Identifiant</label>
+                        <input type="text" id="user-username" autocomplete="off">
+                    </div>
+                    <div class="form-field">
+                        <label for="user-password" id="user-password-label">Mot de passe</label>
+                        <input type="password" id="user-password" autocomplete="new-password">
+                    </div>
+                    <div class="form-field">
+                        <label for="user-role" id="user-role-label">Rôle</label>
+                        <select id="user-role">
+                            <option value="OPERATEUR" id="user-role-operateur">Opérateur</option>
+                            <option value="MAINTENANCE" id="user-role-maintenance">Maintenance</option>
+                        </select>
+                    </div>
+                    <button class="btn" id="user-create-btn" onclick="createUser()">Créer le compte</button>
+                </form>
+
+                <div class="admin-list" id="users-list">
+                    <p style="color:#6E6E73;" id="users-loading-label">Chargement...</p>
+                </div>
+            </div>
+
+            <div class="card">
+                <h2 id="cells-section-title" class="admin-section-title">Cellules robotiques</h2>
+
+                <form id="cell-form" onsubmit="return false;">
+                    <div class="form-field">
+                        <label for="cell-nom" id="cell-nom-label">Nom de la cellule</label>
+                        <input type="text" id="cell-nom" autocomplete="off">
+                    </div>
+                    <div class="form-field">
+                        <label for="cell-type" id="cell-type-label">Type de robot</label>
+                        <input type="text" id="cell-type" autocomplete="off" value="ROBOT KUKA KR210">
+                    </div>
+                    <div class="form-field">
+                        <label for="cell-ip" id="cell-ip-label">Adresse IP</label>
+                        <input type="text" id="cell-ip" autocomplete="off" placeholder="192.168.1.40">
+                    </div>
+                    <button class="btn" id="cell-create-btn" onclick="createCell()">Créer la cellule</button>
+                </form>
+
+                <div class="admin-notice">
+                    ⚠ <span id="cell-restart-notice">La nouvelle cellule n'apparaîtra dans le dashboard qu'après redémarrage du simulateur OPC UA (python -m src_v2.opcua_server).</span>
+                </div>
+
+                <div class="admin-list" id="cells-list">
+                    <p style="color:#6E6E73;" id="cells-loading-label">Chargement...</p>
+                </div>
+            </div>
+        </div>
+    </main>
+
+    <script src="{{ static_v('common.js') }}"></script>
+    <script>
+        const I18N = {
+            fr: {
+                pageTitle: "Administration",
+                usersSectionTitle: "Comptes utilisateurs",
+                usernameLabel: "Identifiant",
+                passwordLabel: "Mot de passe",
+                roleLabel: "Rôle",
+                roleOperateur: "Opérateur",
+                roleMaintenance: "Maintenance",
+                createUserBtn: "Créer le compte",
+                usersLoading: "Chargement...",
+                noUsers: "<p>Aucun compte.</p>",
+                userCreateMissing: "Identifiant et mot de passe requis.",
+                userCreateSuccess: "Compte créé.",
+                userCreateError: "Erreur lors de la création du compte.",
+                cellsSectionTitle: "Cellules robotiques",
+                cellNomLabel: "Nom de la cellule",
+                cellTypeLabel: "Type de robot",
+                cellIpLabel: "Adresse IP",
+                createCellBtn: "Créer la cellule",
+                cellsLoading: "Chargement...",
+                noCells: "<p>Aucune cellule.</p>",
+                cellRestartNotice: "La nouvelle cellule n'apparaîtra dans le dashboard qu'après redémarrage du simulateur OPC UA (python -m src_v2.opcua_server).",
+                cellCreateMissing: "Nom, type de robot et adresse IP requis.",
+                cellCreateSuccess: "Cellule créée. Redémarrez le simulateur OPC UA pour l'activer.",
+                cellCreateError: "Erreur lors de la création de la cellule.",
+            },
+            en: {
+                pageTitle: "Administration",
+                usersSectionTitle: "User accounts",
+                usernameLabel: "Username",
+                passwordLabel: "Password",
+                roleLabel: "Role",
+                roleOperateur: "Operator",
+                roleMaintenance: "Maintenance",
+                createUserBtn: "Create account",
+                usersLoading: "Loading...",
+                noUsers: "<p>No account.</p>",
+                userCreateMissing: "Username and password required.",
+                userCreateSuccess: "Account created.",
+                userCreateError: "Error while creating the account.",
+                cellsSectionTitle: "Robotic cells",
+                cellNomLabel: "Cell name",
+                cellTypeLabel: "Robot type",
+                cellIpLabel: "IP address",
+                createCellBtn: "Create cell",
+                cellsLoading: "Loading...",
+                noCells: "<p>No cell.</p>",
+                cellRestartNotice: "The new cell will only appear on the dashboard after the OPC UA simulator is restarted (python -m src_v2.opcua_server).",
+                cellCreateMissing: "Name, robot type and IP address required.",
+                cellCreateSuccess: "Cell created. Restart the OPC UA simulator to activate it.",
+                cellCreateError: "Error while creating the cell.",
+            },
+        };
+
+        const token = localStorage.getItem('jwt_token');
+        const currentRole = localStorage.getItem('user_role');
+
+        function t(key) {
+            const lang = navLang();
+            return (I18N[lang] && I18N[lang][key]) || I18N.fr[key] || key;
+        }
+
+        function applyLanguage() {
+            document.title = t('pageTitle');
+            document.getElementById('page-title').innerText = t('pageTitle');
+            document.getElementById('users-section-title').innerText = t('usersSectionTitle');
+            document.getElementById('user-username-label').innerText = t('usernameLabel');
+            document.getElementById('user-password-label').innerText = t('passwordLabel');
+            document.getElementById('user-role-label').innerText = t('roleLabel');
+            document.getElementById('user-role-operateur').innerText = t('roleOperateur');
+            document.getElementById('user-role-maintenance').innerText = t('roleMaintenance');
+            document.getElementById('user-create-btn').innerText = t('createUserBtn');
+            document.getElementById('users-loading-label').innerText = t('usersLoading');
+            document.getElementById('cells-section-title').innerText = t('cellsSectionTitle');
+            document.getElementById('cell-nom-label').innerText = t('cellNomLabel');
+            document.getElementById('cell-type-label').innerText = t('cellTypeLabel');
+            document.getElementById('cell-ip-label').innerText = t('cellIpLabel');
+            document.getElementById('cell-create-btn').innerText = t('createCellBtn');
+            document.getElementById('cells-loading-label').innerText = t('cellsLoading');
+            document.getElementById('cell-restart-notice').innerText = t('cellRestartNotice');
+            document.getElementById('access-denied-title').innerText = navT('accessDeniedTitle');
+            document.getElementById('access-denied-body').innerText = navT('accessDeniedBodyAdmin');
+            document.getElementById('access-denied-back').innerText = navT('accessDeniedBack');
+            renderTopNav('admin', currentRole);
+        }
+
+        async function fetchUsers() {
+            try {
+                const response = await fetch('/api/admin/users', {
+                    headers: { Authorization: `Bearer ${token}` },
+                });
+                const data = await response.json();
+                const container = document.getElementById('users-list');
+                if (data.status !== 'ok' || data.users.length === 0) {
+                    container.innerHTML = t('noUsers');
+                    return;
+                }
+                container.innerHTML = data.users.map((u) =>
+                    `<div class="admin-list-item"><span>${u.username}</span><span class="admin-role-badge">${u.role}</span></div>`
+                ).join('');
+            } catch (e) { console.error(e); }
+        }
+
+        async function fetchCells() {
+            try {
+                const response = await fetch('/api/cells', {
+                    headers: { Authorization: `Bearer ${token}` },
+                });
+                const data = await response.json();
+                const container = document.getElementById('cells-list');
+                if (data.status !== 'ok' || data.cells.length === 0) {
+                    container.innerHTML = t('noCells');
+                    return;
+                }
+                container.innerHTML = data.cells.map((c) =>
+                    `<div class="admin-list-item"><span>#${c.id} — ${c.nom}</span></div>`
+                ).join('');
+            } catch (e) { console.error(e); }
+        }
+
+        function fetchAll() {
+            fetchUsers();
+            fetchCells();
+        }
+
+        async function createUser() {
+            const username = document.getElementById('user-username').value.trim();
+            const password = document.getElementById('user-password').value;
+            const role = document.getElementById('user-role').value;
+            if (!username || !password) {
+                showModal(t('userCreateMissing'), 'error');
+                return;
+            }
+            try {
+                const response = await fetch('/api/admin/users', {
+                    method: 'POST',
+                    headers: {
+                        Authorization: `Bearer ${token}`,
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({ username, password, role }),
+                });
+                if (response.ok) {
+                    document.getElementById('user-username').value = '';
+                    document.getElementById('user-password').value = '';
+                    showModal(t('userCreateSuccess'), 'success');
+                    fetchUsers();
+                    // La liste des cellules n'est pas affectée par la création
+                    // d'un compte : loadCellNames() n'a pas besoin d'être
+                    // rappelé ici, contrairement à createCell() ci-dessous.
+                } else {
+                    const err = await response.json().catch(() => ({}));
+                    showModal(err.detail || t('userCreateError'), 'error');
+                }
+            } catch (e) {
+                console.error(e);
+                showModal(t('userCreateError'), 'error');
+            }
+        }
+
+        async function createCell() {
+            const nom = document.getElementById('cell-nom').value.trim();
+            const type_robot = document.getElementById('cell-type').value.trim();
+            const adresse_ip = document.getElementById('cell-ip').value.trim();
+            if (!nom || !type_robot || !adresse_ip) {
+                showModal(t('cellCreateMissing'), 'error');
+                return;
+            }
+            try {
+                const response = await fetch('/api/admin/cells', {
+                    method: 'POST',
+                    headers: {
+                        Authorization: `Bearer ${token}`,
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({ nom, type_robot, adresse_ip }),
+                });
+                if (response.ok) {
+                    document.getElementById('cell-nom').value = '';
+                    document.getElementById('cell-ip').value = '';
+                    showModal(t('cellCreateSuccess'), 'success');
+                    fetchCells();
+                    // Rafraîchit CELL_NAMES/CELL_LIST partagés (common.js) pour
+                    // que cette même page (et le prochain fetchAll d'une autre
+                    // page rechargée) connaisse déjà le nom de la nouvelle
+                    // cellule, même si ses noeuds OPC UA ne seront lisibles
+                    // qu'après redémarrage du simulateur.
+                    loadCellNames();
+                } else {
+                    const err = await response.json().catch(() => ({}));
+                    showModal(err.detail || t('cellCreateError'), 'error');
+                }
+            } catch (e) {
+                console.error(e);
+                showModal(t('cellCreateError'), 'error');
+            }
+        }
+
+        if (!token) {
+            window.location.href = '/';
+        } else if (currentRole !== 'ADMIN') {
+            applyLanguage();
+            document.getElementById('access-denied').classList.remove('hidden');
+        } else {
+            applyLanguage();
+            document.getElementById('page-content').classList.remove('hidden');
+            fetchAll();
+        }
+    </script>
+</body>
+</html>

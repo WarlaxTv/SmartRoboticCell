@@ -340,3 +340,37 @@ a.btn, a.btn:hover, a.btn:visited { text-decoration: none; }
 }
 .chart-zoom-body { flex: 1; min-height: 0; position: relative; }
 .chart-zoom-body canvas { max-height: 100%; }
+
+/* ---------- Page Administration (comptes, cellules) ---------- */
+
+/* .form-field couvrait déjà textarea/input[type="text"] (popup
+   d'intervention) : étendu ici aux champs password/select nécessaires aux
+   formulaires de création de compte/cellule, avec le même rendu visuel. */
+.form-field input[type="password"],
+.form-field input[type="number"],
+.form-field select {
+    width: 100%; box-sizing: border-box; padding: 10px 12px; border: 1px solid var(--border);
+    border-radius: var(--radius-sm); background: var(--bg); font-size: 0.9em; font-family: inherit;
+}
+
+.admin-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; align-items: start; }
+@media (max-width: 900px) { .admin-grid { grid-template-columns: 1fr; } }
+
+.admin-section-title { margin: 0 0 14px 0; font-size: 1.05em; font-weight: 600; color: var(--ink); }
+
+.admin-list { margin-top: 18px; }
+.admin-list-item {
+    padding: 10px 0; border-bottom: 1px solid var(--border); font-size: 0.9em;
+    display: flex; justify-content: space-between; align-items: center; gap: 10px;
+}
+.admin-list-item:last-child { border-bottom: none; }
+.admin-role-badge {
+    font-size: 0.72em; font-weight: 700; padding: 3px 9px; border-radius: 999px;
+    background: var(--nav-bg); color: white; letter-spacing: 0.02em;
+}
+
+.admin-notice {
+    margin-top: 18px; padding: 12px 14px; background-color: var(--warn-bg);
+    border-radius: var(--radius-sm); font-size: 0.85em; color: var(--warn);
+    font-weight: 600; display: flex; align-items: center; gap: 10px;
+}

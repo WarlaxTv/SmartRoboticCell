@@ -28,9 +28,6 @@
                 <label for="cell-filter" class="filter-bar-label" id="filter-cell-label">Cellule :</label>
                 <select id="cell-filter" onchange="fetchAll()">
                     <option value="">Toutes</option>
-                    <option value="1">1</option>
-                    <option value="2">2</option>
-                    <option value="3">3</option>
                 </select>
             </div>
             <div class="filter-bar-group">
@@ -159,14 +156,22 @@
             document.getElementById('generic-pending-title').innerText = t('genericPendingTitle');
             document.getElementById('generic-pending-loading-label').innerText = t('pendingLoading');
             document.getElementById('history-title').innerText = currentRole === 'OPERATEUR' ? t('historyTitleOperator') : t('historyTitle');
-            for (const cellId of [1, 2, 3]) {
-                const opt = document.querySelector(`#cell-filter option[value="${cellId}"]`);
-                if (opt) opt.innerText = cellDisplayName(cellId);
-            }
             document.getElementById('access-denied-title').innerText = navT('accessDeniedTitle');
             document.getElementById('access-denied-body').innerText = navT('accessDeniedBody');
             document.getElementById('access-denied-back').innerText = navT('accessDeniedBack');
             renderTopNav('maint-history', currentRole);
+        }
+
+        // Menu de filtre "joli" : nom de cellule affiché, pas seulement un
+        // id — reconstruit depuis CELL_LIST (common.js::loadCellNames()),
+        // plutôt que les 3 options figées d'origine, depuis que
+        // l'Administrateur peut créer de nouvelles cellules (CHG-V2-088).
+        function populateCellFilterOptions() {
+            const select = document.getElementById('cell-filter');
+            const current = select.value;
+            select.innerHTML = `<option value="">${t('allCells')}</option>` +
+                CELL_LIST.map((c) => `<option value="${c.id}">${cellDisplayName(c.id)}</option>`).join('');
+            select.value = current;
         }
 
         function resetFilters() {
@@ -292,31 +297,37 @@
 
         function fetchAll() {
             fetchHistory();
-            if (currentRole === 'MAINTENANCE') {
+            if (hasMaintenanceRights(currentRole)) {
                 fetchPending();
                 fetchGenericPending();
             }
         }
 
-        if (!token) {
-            window.location.href = '/';
-        } else if (currentRole !== 'MAINTENANCE' && currentRole !== 'OPERATEUR') {
-            applyLanguage();
-            document.getElementById('access-denied').classList.remove('hidden');
-        } else {
-            applyLanguage();
-            // Le panneau "Demandes en attente" (défauts actifs + demandes
-            // génériques, avec actions "Intervenir"/"Prise en charge") est un
-            // outil de travail Maintenance ; l'Opérateur ne voit que
-            // l'historique de SES propres demandes (déjà filtré côté serveur,
-            // cf. CHG-V2-066), sans ce panneau.
-            if (currentRole === 'OPERATEUR') {
-                document.getElementById('pending-panel').classList.add('hidden');
+        async function init() {
+            if (!token) {
+                window.location.href = '/';
+            } else if (!hasPageAccess(currentRole)) {
+                applyLanguage();
+                document.getElementById('access-denied').classList.remove('hidden');
+            } else {
+                await loadCellNames();
+                populateCellFilterOptions();
+                applyLanguage();
+                // Le panneau "Demandes en attente" (défauts actifs + demandes
+                // génériques, avec actions "Intervenir"/"Prise en charge") est un
+                // outil de travail Maintenance ; l'Opérateur ne voit que
+                // l'historique de SES propres demandes (déjà filtré côté serveur,
+                // cf. CHG-V2-066), sans ce panneau.
+                if (currentRole === 'OPERATEUR') {
+                    document.getElementById('pending-panel').classList.add('hidden');
+                }
+                document.getElementById('page-content').classList.remove('hidden');
+                fetchAll();
+                setInterval(fetchAll, 5000);
             }
-            document.getElementById('page-content').classList.remove('hidden');
-            fetchAll();
-            setInterval(fetchAll, 5000);
         }
+
+        init();
     </script>
 </body>
 </html>

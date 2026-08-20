@@ -8,21 +8,62 @@
  * etc.) et appelle les fonctions ci-dessous pour tout ce qui est commun.
  */
 
-/* Noms des 3 cellules, tels qu'exposés par le serveur OPC UA simulé
- * (src_v2/opcua_server.py, variable cell_names) : fixes pour ce POC à 3
- * cellules. Dupliqués ici (plutôt que récupérés via /api/status) pour que
- * les pages d'historique (fault_history.html, maintenance_history.html)
- * puissent afficher un menu de filtre lisible sans dépendre d'un appel API
- * supplémentaire ni d'un rôle OPERATEUR/MAINTENANCE particulier. */
-const CELL_NAMES = {
-    1: "PERÇAGE AÉRO",
-    2: "ASSEMBLAGE",
-    3: "CONTRÔLE QUALITÉ",
-};
+/* Identité des cellules (nom par id, liste complète) : gérée dynamiquement
+ * depuis la base (table Cellule) plutôt que codée en dur ici, depuis que
+ * l'Administrateur peut créer de nouvelles cellules (cf. CHG-V2-088) — ce
+ * POC ne se limite plus à 3 cellules fixes. CELL_NAMES/CELL_LIST démarrent
+ * vides et sont peuplés par loadCellNames() ci-dessous ; en attendant ce
+ * chargement, cellDisplayName() retombe sur "#<id>" plutôt que de planter. */
+let CELL_NAMES = {};
+let CELL_LIST = []; // [{id, nom}, ...] tel que renvoyé par GET /api/cells
 
 function cellDisplayName(cellId) {
     const name = CELL_NAMES[cellId];
     return name ? `#${cellId} — ${name}` : `#${cellId}`;
+}
+
+/**
+ * Charge la liste des cellules existantes (GET /api/cells, ouvert à tout
+ * rôle authentifié) et peuple CELL_NAMES/CELL_LIST. Chaque page doit
+ * `await loadCellNames()` avant tout rendu dépendant de cellDisplayName()
+ * ou de la liste des cellules (menus de filtre de fault_history.html/
+ * maintenance_history.html, sections par cellule de data_comparison.html).
+ * Remplace l'ancienne constante CELL_NAMES figée à 3 entrées codées en dur.
+ */
+async function loadCellNames() {
+    const token = localStorage.getItem('jwt_token');
+    if (!token) return;
+    try {
+        const resp = await fetch('/api/cells', {
+            headers: { Authorization: `Bearer ${token}` },
+        });
+        if (!resp.ok) return;
+        const data = await resp.json();
+        CELL_LIST = data.cells || [];
+        CELL_NAMES = {};
+        for (const c of CELL_LIST) CELL_NAMES[c.id] = c.nom;
+    } catch (e) {
+        console.error(e);
+    }
+}
+
+/**
+ * ADMIN a tous les droits (cf. décision utilisateur : "Admin = tous les
+ * droits"), y compris ceux normalement réservés à MAINTENANCE. Centralise
+ * cette vérification plutôt que de dupliquer `role === 'MAINTENANCE' ||
+ * role === 'ADMIN'` à chaque site d'appel de chaque page.
+ */
+function hasMaintenanceRights(role) {
+    return role === 'MAINTENANCE' || role === 'ADMIN';
+}
+
+/**
+ * Pages/actions en lecture ouvertes à la fois à Maintenance et Opérateur
+ * (cf. décision utilisateur round 6) : ADMIN y a accès aussi, cohérent avec
+ * hasMaintenanceRights() ci-dessus.
+ */
+function hasPageAccess(role) {
+    return role === 'MAINTENANCE' || role === 'OPERATEUR' || role === 'ADMIN';
 }
 
 /* Statut d'un DefautHistorique (voir src_v2/db.py) : "actif" (pas encore
@@ -81,6 +122,7 @@ const NAV_I18N = {
         navMaintHistory: "Historique Maintenance",
         navFaultHistory: "Historique Pannes",
         navData: "Données",
+        navAdmin: "Administration",
         navBackDashboard: "← Retour au dashboard",
         navSignOut: "Déconnexion",
         modalClose: "Fermer",
@@ -91,6 +133,7 @@ const NAV_I18N = {
         promptCancel: "Annuler",
         accessDeniedTitle: "Accès réservé",
         accessDeniedBody: "Cette page est réservée au rôle MAINTENANCE.",
+        accessDeniedBodyAdmin: "Cette page est réservée au rôle ADMIN.",
         accessDeniedBack: "Retour au dashboard",
     },
     en: {
@@ -99,6 +142,7 @@ const NAV_I18N = {
         navMaintHistory: "Maintenance History",
         navFaultHistory: "Fault History",
         navData: "Data",
+        navAdmin: "Administration",
         navBackDashboard: "← Back to dashboard",
         navSignOut: "Sign Out",
         modalClose: "Close",
@@ -109,6 +153,7 @@ const NAV_I18N = {
         promptCancel: "Cancel",
         accessDeniedTitle: "Restricted access",
         accessDeniedBody: "This page is restricted to the MAINTENANCE role.",
+        accessDeniedBodyAdmin: "This page is restricted to the ADMIN role.",
         accessDeniedBack: "Back to dashboard",
     },
 };
@@ -134,6 +179,7 @@ function renderTopNav(activePage, role) {
 
     const isMaint = role === 'MAINTENANCE';
     const isOperator = role === 'OPERATEUR';
+    const isAdmin = role === 'ADMIN';
     const link = (page, href, label) => {
         const activeClass = activePage === page ? ' class="active"' : '';
         return `<a href="${href}"${activeClass}>${label}</a>`;
@@ -147,11 +193,19 @@ function renderTopNav(activePage, role) {
     // l'opérateur ne peut pas faire c'est créer des alertes, ni télécharger
     // les graphs" — l'onglet Courbes reste donc visible, seul le
     // téléchargement (CSV/image) est réservé à la Maintenance, cf.
-    // data_comparison.html).
-    if (isMaint || isOperator) {
+    // data_comparison.html). ADMIN a tous les droits (cf.
+    // hasMaintenanceRights ci-dessus) : accès aux mêmes pages que la
+    // Maintenance, plus le lien Administration ci-dessous.
+    if (isMaint || isOperator || isAdmin) {
         links.push(link('maint-history', '/historique-maintenance', navT('navMaintHistory')));
         links.push(link('fault-history', '/historique-pannes', navT('navFaultHistory')));
         links.push(link('data', '/donnees', navT('navData')));
+    }
+    // Gestion des comptes et des cellules : réservée à ADMIN (cf. demande
+    // utilisateur "compte administrateur ... créer des comptes ... créer
+    // des nouvelles cellules de robots").
+    if (isAdmin) {
+        links.push(link('admin', '/administration', navT('navAdmin')));
     }
 
     const roleLabel = role ? role : '---';

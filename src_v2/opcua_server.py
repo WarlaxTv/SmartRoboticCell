@@ -4,6 +4,8 @@ import random
 
 from asyncua import Server, ua
 
+from src_v2 import db
+
 logging.basicConfig(level=logging.INFO)
 LOGGER = logging.getLogger("asyncua")
 
@@ -105,14 +107,23 @@ async def main() -> None:
     # Noeud principal de supervision
     supervision_node = await server.nodes.objects.add_object(idx, "SupervisionUsine")
 
-    # Types de robots disponibles
-    robot_types = ["ROBOT KUKA KR210", "ROBOT KUKA KR210", "ROBOT KUKA KR210"]
-    cell_names = ["PERÇAGE AÉRO", "ASSEMBLAGE", "CONTRÔLE QUALITÉ"]
-    cell_ips = ["192.168.1.10", "192.168.1.20", "192.168.1.30"]
+    # Liste des cellules à simuler : lue depuis la base de données (table
+    # Cellule) plutôt que codée en dur, depuis que l'Administrateur peut en
+    # créer de nouvelles depuis la page /administration (cf. CHG-V2-088). Ce
+    # module tourne dans un processus séparé de web_server.py (cf. docstring
+    # d'opcua_client.py) : la base SQLite est leur seul point de partage.
+    # db.init_db() est idempotent (crée les tables/amorce les cellules par
+    # défaut si absentes) et sûr à appeler ici même si web_server.py l'a déjà
+    # fait dans son propre processus.
+    db.init_db()
+    with db.Session(db.engine) as _session:
+        cellules = db.list_cellules(_session)
+    LOGGER.info("Cellules chargées depuis la base : %s", [c.nom for c in cellules])
 
-    # Création de trois cellules simulées
+    # Création des cellules simulées
     cells = []
-    for i in range(1, 4):
+    for cellule in cellules:
+        i = cellule.id
         cell_obj = await supervision_node.add_object(idx, f"CelluleRobotique_{i}")
 
         # Variables d'état existantes
@@ -120,9 +131,9 @@ async def main() -> None:
         fault_var = await cell_obj.add_variable(idx, "EnDefaut", False)
 
         # Nouvelles variables industrielles
-        type_var = await cell_obj.add_variable(idx, "TypeRobot", robot_types[i - 1])
-        name_var = await cell_obj.add_variable(idx, "NomCellule", cell_names[i - 1])
-        ip_var = await cell_obj.add_variable(idx, "AdresseIP", cell_ips[i - 1])
+        type_var = await cell_obj.add_variable(idx, "TypeRobot", cellule.type_robot)
+        name_var = await cell_obj.add_variable(idx, "NomCellule", cellule.nom)
+        ip_var = await cell_obj.add_variable(idx, "AdresseIP", cellule.adresse_ip)
         progress_var = await cell_obj.add_variable(
             idx,
             "ProgressionCycle",

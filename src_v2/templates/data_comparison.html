@@ -121,8 +121,11 @@
 
         const token = localStorage.getItem('jwt_token');
         const currentRole = localStorage.getItem('user_role');
-        const CELLS = [1, 2, 3];
-        const CELL_COLORS = ['#0071E3', '#34C759', '#FF9500'];
+        // Peuplée depuis CELL_LIST (common.js::loadCellNames()) avant tout
+        // rendu : cette page n'est plus limitée à 3 cellules fixes depuis que
+        // l'Administrateur peut en créer de nouvelles (cf. CHG-V2-088).
+        let CELLS = [];
+        const CELL_COLORS = ['#0071E3', '#34C759', '#FF9500', '#FF3B30', '#5E5CE6', '#AF52DE'];
         // Mêmes couleurs que cell_detail.html pour la cohérence visuelle
         // d'un axe donné d'une page à l'autre.
         const AXIS_COLORS = ['#0071E3', '#34C759', '#FF9500', '#FF3B30', '#5E5CE6', '#AF52DE'];
@@ -238,7 +241,7 @@
         // les cartes étant reconstruites dynamiquement, un passage de
         // masquage exécuté avant loadAll() n'aurait plus rien à masquer.
         function cellSectionHtml(cellId) {
-            const dlBtn = (key) => currentRole === 'MAINTENANCE'
+            const dlBtn = (key) => hasMaintenanceRights(currentRole)
                 ? `<button type="button" class="chart-zoom-btn chart-dl-btn" onclick="downloadChart('${key}')" title="Télécharger l'image">&#8681;</button>`
                 : '';
             const card = (key, title, canvasId) => `
@@ -362,7 +365,7 @@
 
             CELLS.forEach((cellId, i) => {
                 const data = perCell[i];
-                const color = CELL_COLORS[i];
+                const color = CELL_COLORS[i % CELL_COLORS.length];
 
                 const tempResult = buildTempDatasetsForCell(data.axis_measures);
                 const avg = decimateSeries(
@@ -477,29 +480,40 @@
             ).join('');
         }
 
-        if (!token) {
-            window.location.href = '/';
-        } else if (currentRole !== 'MAINTENANCE' && currentRole !== 'OPERATEUR') {
-            applyLanguage();
-            document.getElementById('access-denied').classList.remove('hidden');
-        } else {
-            applyLanguage();
-            // Courbes ouvertes en lecture à l'Opérateur (cf. décision
-            // utilisateur round 6), mais tout téléchargement (CSV ou image
-            // de courbe) reste réservé à la Maintenance : "la seule chose
-            // que l'opérateur ne peut pas faire c'est créer des alertes, ni
-            // télécharger les graphs". Les boutons de téléchargement d'image
-            // ne sont plus masqués après coup ici : cellSectionHtml() ne les
-            // génère désormais que pour currentRole === 'MAINTENANCE' (les
-            // cartes de courbes étant reconstruites à chaque loadAll(), un
-            // masquage exécuté une seule fois ici, avant leur création,
-            // n'aurait plus rien à masquer).
-            if (currentRole !== 'MAINTENANCE') {
-                document.getElementById('tab-btn-download').classList.add('hidden');
+        async function init() {
+            if (!token) {
+                window.location.href = '/';
+            } else if (!hasPageAccess(currentRole)) {
+                applyLanguage();
+                document.getElementById('access-denied').classList.remove('hidden');
+            } else {
+                // Doit être chargé AVANT applyLanguage()/loadAll() : la liste
+                // des cellules (CELL_LIST) alimente à la fois CELLS ci-dessous
+                // et cellDisplayName() utilisé par applyLanguage() → aucun des
+                // deux ne peut s'exécuter avec des données à jour tant que
+                // cet appel n'est pas résolu.
+                await loadCellNames();
+                CELLS = CELL_LIST.map((c) => c.id);
+                applyLanguage();
+                // Courbes ouvertes en lecture à l'Opérateur (cf. décision
+                // utilisateur round 6), mais tout téléchargement (CSV ou image
+                // de courbe) reste réservé à la Maintenance : "la seule chose
+                // que l'opérateur ne peut pas faire c'est créer des alertes, ni
+                // télécharger les graphs". Les boutons de téléchargement d'image
+                // ne sont plus masqués après coup ici : cellSectionHtml() ne les
+                // génère désormais que pour hasMaintenanceRights(currentRole) (les
+                // cartes de courbes étant reconstruites à chaque loadAll(), un
+                // masquage exécuté une seule fois ici, avant leur création,
+                // n'aurait plus rien à masquer).
+                if (!hasMaintenanceRights(currentRole)) {
+                    document.getElementById('tab-btn-download').classList.add('hidden');
+                }
+                document.getElementById('page-content').classList.remove('hidden');
+                loadAll();
             }
-            document.getElementById('page-content').classList.remove('hidden');
-            loadAll();
         }
+
+        init();
     </script>
 </body>
 </html>
