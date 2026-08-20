@@ -53,6 +53,39 @@ def test_history_entry_persists_across_sessions() -> None:
     )
 
 
+def test_list_history_filters_by_cellule_id() -> None:
+    """La page de détail d'une cellule doit pouvoir ne récupérer que ses
+    propres interventions, sans affecter l'appel existant sans filtre.
+    """
+
+    db.init_db()
+
+    with Session(db.engine) as session:
+        db.add_history_entry(
+            session,
+            action="Intervention cellule isolée 40",
+            username_auteur="luc_maint",
+            cellule_id=40,
+        )
+        db.add_history_entry(
+            session,
+            action="Intervention cellule isolée 41",
+            username_auteur="luc_maint",
+            cellule_id=41,
+        )
+
+    with Session(db.engine) as session:
+        filtered = db.list_history(session, cellule_id=40)
+        unfiltered = db.list_history(session)
+
+    assert all(entry.cellule_id == 40 for entry in filtered)
+    assert any(entry.action == "Intervention cellule isolée 40" for entry in filtered)
+    assert not any(
+        entry.action == "Intervention cellule isolée 41" for entry in filtered
+    )
+    assert any(entry.action == "Intervention cellule isolée 41" for entry in unfiltered)
+
+
 def test_get_user_unknown_returns_none() -> None:
     db.init_db()
     with Session(db.engine) as session:
@@ -77,3 +110,176 @@ def test_history_rejects_unknown_author_foreign_key() -> None:
                 username_auteur="utilisateur_qui_nexiste_pas",
                 cellule_id=1,
             )
+
+
+def test_axis_measure_persists_and_is_filtered_by_cell_and_time() -> None:
+    db.init_db()
+
+    with Session(db.engine) as session:
+        db.add_axis_measure(
+            session,
+            cellule_id=1,
+            axe=3,
+            temperature_c=42.5,
+            courant_a=1.8,
+            couple_nm=12.0,
+            horodatage="2026-08-01 10:00:00",
+        )
+        db.add_axis_measure(
+            session,
+            cellule_id=1,
+            axe=3,
+            temperature_c=43.0,
+            courant_a=1.9,
+            couple_nm=12.1,
+            horodatage="2026-08-19 10:00:00",
+        )
+        # Autre cellule : ne doit jamais apparaître dans les résultats filtrés
+        # sur cellule_id=1 ci-dessous.
+        db.add_axis_measure(
+            session,
+            cellule_id=2,
+            axe=3,
+            temperature_c=99.0,
+            courant_a=9.9,
+            couple_nm=99.0,
+            horodatage="2026-08-19 10:00:00",
+        )
+
+    with Session(db.engine) as session:
+        recent = db.list_axis_measures(
+            session, cellule_id=1, since="2026-08-10 00:00:00"
+        )
+        everything = db.list_axis_measures(
+            session, cellule_id=1, since="2026-01-01 00:00:00"
+        )
+
+    assert len(recent) == 1
+    assert recent[0].temperature_c == 43.0
+    assert len(everything) == 2
+    assert all(m.cellule_id == 1 for m in everything)
+
+
+def test_cell_measure_persists_and_is_filtered_by_cell_and_time() -> None:
+    db.init_db()
+
+    with Session(db.engine) as session:
+        db.add_cell_measure(
+            session,
+            cellule_id=2,
+            pneumatic_pressure_bar=6.1,
+            lubrix_level_pct=88.0,
+            horodatage="2026-08-01 08:00:00",
+        )
+        db.add_cell_measure(
+            session,
+            cellule_id=2,
+            pneumatic_pressure_bar=6.3,
+            lubrix_level_pct=87.5,
+            horodatage="2026-08-19 08:00:00",
+        )
+
+    with Session(db.engine) as session:
+        recent = db.list_cell_measures(
+            session, cellule_id=2, since="2026-08-10 00:00:00"
+        )
+
+    assert len(recent) == 1
+    assert recent[0].pneumatic_pressure_bar == 6.3
+
+
+def test_add_defaut_and_list_defauts_most_recent_first() -> None:
+    db.init_db()
+
+    with Session(db.engine) as session:
+        db.add_defaut(
+            session,
+            cellule_id=10,
+            type_defaut="Défaut capteur température",
+            severite="avertissement",
+            description="Premier défaut du test",
+            horodatage="2026-08-01 09:00:00",
+        )
+        db.add_defaut(
+            session,
+            cellule_id=10,
+            type_defaut="Collision détectée",
+            severite="critique",
+            description="Second défaut du test",
+            horodatage="2026-08-19 09:00:00",
+        )
+
+    with Session(db.engine) as session:
+        faults = db.list_defauts(session, cellule_id=10)
+
+    assert len(faults) == 2
+    # Le plus récent (par id croissant / insertion) doit arriver en premier.
+    assert faults[0].type_defaut == "Collision détectée"
+    assert faults[0].resolu is False
+
+
+def test_resolve_last_defaut_marks_most_recent_unresolved_as_resolved() -> None:
+    db.init_db()
+
+    with Session(db.engine) as session:
+        db.add_defaut(
+            session,
+            cellule_id=5,
+            type_defaut="Défaut ancien",
+            severite="avertissement",
+            description="Ne doit pas être touché",
+            horodatage="2026-08-01 09:00:00",
+        )
+        db.add_defaut(
+            session,
+            cellule_id=5,
+            type_defaut="Défaut récent",
+            severite="critique",
+            description="Doit être résolu",
+            horodatage="2026-08-19 09:00:00",
+        )
+
+    with Session(db.engine) as session:
+        resolved = db.resolve_last_defaut(session, cellule_id=5)
+
+    assert resolved is not None
+    assert resolved.type_defaut == "Défaut récent"
+    assert resolved.resolu is True
+
+    with Session(db.engine) as session:
+        faults = db.list_defauts(session, cellule_id=5)
+
+    still_unresolved = [f for f in faults if not f.resolu]
+    assert len(still_unresolved) == 1
+    assert still_unresolved[0].type_defaut == "Défaut ancien"
+
+
+def test_resolve_last_defaut_returns_none_when_nothing_to_resolve() -> None:
+    db.init_db()
+    with Session(db.engine) as session:
+        assert db.resolve_last_defaut(session, cellule_id=999) is None
+
+
+def test_list_defauts_without_cell_filter_returns_all_cells() -> None:
+    db.init_db()
+
+    with Session(db.engine) as session:
+        db.add_defaut(
+            session,
+            cellule_id=30,
+            type_defaut="Défaut cellule 30",
+            severite="critique",
+            description="...",
+        )
+        db.add_defaut(
+            session,
+            cellule_id=31,
+            type_defaut="Défaut cellule 31",
+            severite="avertissement",
+            description="...",
+        )
+
+    with Session(db.engine) as session:
+        faults = db.list_defauts(session)
+
+    assert {f.cellule_id for f in faults} >= {30, 31}

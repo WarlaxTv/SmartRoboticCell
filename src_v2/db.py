@@ -70,6 +70,53 @@ class HistoriqueMaintenance(SQLModel, table=True):
     cellule_id: int
 
 
+class MesureAxe(SQLModel, table=True):
+    """Un relevé horodaté d'un axe moteur d'une cellule robotique.
+
+    Persisté périodiquement (tâche de fond dans web_server.py, cf.
+    ``_sampling_loop``) à partir des données OPC UA, pour constituer un
+    historique exploitable (courbes de tendance sur la page de détail d'une
+    cellule) plutôt qu'un simple instantané en mémoire.
+    """
+
+    id: int | None = Field(default=None, primary_key=True)
+    horodatage: str
+    cellule_id: int
+    axe: int  # 1 à 6
+    temperature_c: float
+    courant_a: float
+    couple_nm: float
+
+
+class MesureCellule(SQLModel, table=True):
+    """Un relevé horodaté des grandeurs globales d'une cellule (hors axes).
+
+    Couvre la pression pneumatique et le niveau de lubrifiant, en complément
+    de MesureAxe pour les données par axe.
+    """
+
+    id: int | None = Field(default=None, primary_key=True)
+    horodatage: str
+    cellule_id: int
+    pneumatic_pressure_bar: float
+    lubrix_level_pct: float
+
+
+class DefautHistorique(SQLModel, table=True):
+    """Une ligne = un défaut survenu sur une cellule (distinct de l'historique
+    de maintenance : ceci trace l'événement technique lui-même — type, gravité
+    — indépendamment de l'intervention humaine qui peut y répondre.
+    """
+
+    id: int | None = Field(default=None, primary_key=True)
+    horodatage: str
+    cellule_id: int
+    type_defaut: str
+    severite: str  # "critique" ou "avertissement"
+    description: str
+    resolu: bool = False
+
+
 # Hashs bcrypt réels (générés via la librairie bcrypt, pas des chaînes
 # fictives) pour "ope123" et "maint123", utilisés uniquement pour amorcer la
 # base de démo au premier lancement.
@@ -132,9 +179,163 @@ def add_history_entry(
     return entry
 
 
-def list_history(session: Session) -> list[HistoriqueMaintenance]:
-    """Retourne l'historique de maintenance complet, dans l'ordre chronologique."""
+def list_history(
+    session: Session, cellule_id: int | None = None
+) -> list[HistoriqueMaintenance]:
+    """Retourne l'historique de maintenance, dans l'ordre chronologique.
+
+    Filtre sur une cellule si ``cellule_id`` est fourni, sinon retourne
+    l'historique de toutes les cellules (comportement inchangé pour les
+    appelants existants).
+    """
+
+    query = select(HistoriqueMaintenance)
+    if cellule_id is not None:
+        query = query.where(HistoriqueMaintenance.cellule_id == cellule_id)
+    query = query.order_by(HistoriqueMaintenance.id)
+    return list(session.exec(query))
+
+
+def add_axis_measure(
+    session: Session,
+    cellule_id: int,
+    axe: int,
+    temperature_c: float,
+    courant_a: float,
+    couple_nm: float,
+    horodatage: str | None = None,
+) -> MesureAxe:
+    """Ajoute et persiste un relevé pour un axe d'une cellule."""
+
+    entry = MesureAxe(
+        horodatage=horodatage or datetime.now(UTC).strftime("%Y-%m-%d %H:%M:%S"),
+        cellule_id=cellule_id,
+        axe=axe,
+        temperature_c=temperature_c,
+        courant_a=courant_a,
+        couple_nm=couple_nm,
+    )
+    session.add(entry)
+    session.commit()
+    session.refresh(entry)
+    return entry
+
+
+def add_cell_measure(
+    session: Session,
+    cellule_id: int,
+    pneumatic_pressure_bar: float,
+    lubrix_level_pct: float,
+    horodatage: str | None = None,
+) -> MesureCellule:
+    """Ajoute et persiste un relevé des grandeurs globales d'une cellule."""
+
+    entry = MesureCellule(
+        horodatage=horodatage or datetime.now(UTC).strftime("%Y-%m-%d %H:%M:%S"),
+        cellule_id=cellule_id,
+        pneumatic_pressure_bar=pneumatic_pressure_bar,
+        lubrix_level_pct=lubrix_level_pct,
+    )
+    session.add(entry)
+    session.commit()
+    session.refresh(entry)
+    return entry
+
+
+def list_axis_measures(
+    session: Session, cellule_id: int, since: str
+) -> list[MesureAxe]:
+    """Retourne les relevés d'axes d'une cellule postérieurs à ``since``."""
 
     return list(
-        session.exec(select(HistoriqueMaintenance).order_by(HistoriqueMaintenance.id))
+        session.exec(
+            select(MesureAxe)
+            .where(MesureAxe.cellule_id == cellule_id)
+            .where(MesureAxe.horodatage >= since)
+            .order_by(MesureAxe.horodatage)
+        )
     )
+
+
+def list_cell_measures(
+    session: Session, cellule_id: int, since: str
+) -> list[MesureCellule]:
+    """Retourne les relevés globaux d'une cellule postérieurs à ``since``."""
+
+    return list(
+        session.exec(
+            select(MesureCellule)
+            .where(MesureCellule.cellule_id == cellule_id)
+            .where(MesureCellule.horodatage >= since)
+            .order_by(MesureCellule.horodatage)
+        )
+    )
+
+
+def add_defaut(
+    session: Session,
+    cellule_id: int,
+    type_defaut: str,
+    severite: str,
+    description: str,
+    horodatage: str | None = None,
+) -> DefautHistorique:
+    """Ajoute et persiste un défaut dans l'historique."""
+
+    entry = DefautHistorique(
+        horodatage=horodatage or datetime.now(UTC).strftime("%Y-%m-%d %H:%M:%S"),
+        cellule_id=cellule_id,
+        type_defaut=type_defaut,
+        severite=severite,
+        description=description,
+        resolu=False,
+    )
+    session.add(entry)
+    session.commit()
+    session.refresh(entry)
+    return entry
+
+
+def resolve_last_defaut(session: Session, cellule_id: int) -> DefautHistorique | None:
+    """Marque le défaut non résolu le plus récent d'une cellule comme résolu.
+
+    Retourne l'entrée modifiée, ou None si aucun défaut non résolu n'existe
+    pour cette cellule.
+    """
+
+    # SQLAlchemy/SQLModel exige "== False" (surcharge d'opérateur pour construire
+    # l'expression SQL) ; "is False" ou "not ..." ne fonctionnent pas ici. Et
+    # DefautHistorique.id est un descripteur résolu à l'exécution : pylint
+    # l'analyse statiquement comme un simple FieldInfo et ne voit donc pas sa
+    # méthode .desc() (faux positif connu avec SQLModel).
+    # pylint: disable=singleton-comparison,no-member
+    entry = session.exec(
+        select(DefautHistorique)
+        .where(DefautHistorique.cellule_id == cellule_id)
+        .where(DefautHistorique.resolu == False)  # noqa: E712
+        .order_by(DefautHistorique.id.desc())
+    ).first()
+    # pylint: enable=singleton-comparison,no-member
+    if entry is None:
+        return None
+    entry.resolu = True
+    session.add(entry)
+    session.commit()
+    session.refresh(entry)
+    return entry
+
+
+def list_defauts(
+    session: Session, cellule_id: int | None = None
+) -> list[DefautHistorique]:
+    """Retourne l'historique des défauts, du plus récent au plus ancien.
+
+    Filtre sur une cellule si ``cellule_id`` est fourni, sinon retourne
+    l'historique de toutes les cellules.
+    """
+
+    query = select(DefautHistorique)
+    if cellule_id is not None:
+        query = query.where(DefautHistorique.cellule_id == cellule_id)
+    query = query.order_by(DefautHistorique.id.desc())  # pylint: disable=no-member
+    return list(session.exec(query))

@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 import asyncio
+from datetime import datetime
 from typing import Any
 
 import pytest
 from fastapi.testclient import TestClient
+from sqlmodel import Session
 
-from src_v2 import web_server
+from src_v2 import db, opcua_client, web_server
 
 
 def _auth_header(token: str) -> dict[str, str]:
@@ -138,7 +140,7 @@ def test_simu_action_allowed_for_maintenance(monkeypatch: pytest.MonkeyPatch) ->
         async def get_namespace_index(self, *_args: Any, **_kwargs: Any) -> int:
             return 2
 
-    monkeypatch.setattr(web_server, "Client", _FakeClient)
+    monkeypatch.setattr(opcua_client, "Client", _FakeClient)
     client = TestClient(web_server.app)
 
     token = _make_token("luc_maint", "MAINTENANCE")
@@ -197,7 +199,7 @@ def test_simu_action_all_branches(monkeypatch: pytest.MonkeyPatch) -> None:
         async def get_namespace_index(self, *_args: Any, **_kwargs: Any) -> int:
             return 2
 
-    monkeypatch.setattr(web_server, "Client", _FakeClient)
+    monkeypatch.setattr(opcua_client, "Client", _FakeClient)
     client = TestClient(web_server.app)
     token = _make_token("luc_maint", "MAINTENANCE")
 
@@ -239,7 +241,7 @@ def test_fetch_opcua_data_success(monkeypatch: pytest.MonkeyPatch) -> None:
                 "NiveauLubrifiant": 90,
                 "TemperatureAxes": 40.0,
                 "NiveauVibration": 1.2,
-                "VitesseBras": 95.0,
+                "VitesseCycle": 95.0,
             }
             return _ReadVar(mapping[name])
 
@@ -266,7 +268,7 @@ def test_fetch_opcua_data_success(monkeypatch: pytest.MonkeyPatch) -> None:
         async def get_namespace_index(self, *_args: Any, **_kwargs: Any) -> int:
             return 2
 
-    monkeypatch.setattr(web_server, "Client", _FakeClient)
+    monkeypatch.setattr(opcua_client, "Client", _FakeClient)
     data = asyncio.run(web_server.fetch_opcua_data())
     assert len(data) == 3
     assert data[0]["name"] == "CELL1"
@@ -305,3 +307,416 @@ def test_maintenance_can_read_history_after_request(client: TestClient) -> None:
     assert body["status"] == "ok"
     assert isinstance(body["history"], list)
     assert any("Cellule 2" in item.get("action", "") for item in body["history"])
+
+
+def test_maintenance_history_filters_by_cell_id(client: TestClient) -> None:
+    """La page de détail d'une cellule ne doit voir que ses propres
+    interventions : /api/maintenance/history?cell_id=X doit filtrer, sans
+    casser l'appel sans filtre (utilisé par la page dédiée toutes cellules).
+    """
+
+    op_token = _make_token("jean_ope", "OPERATEUR")
+    client.post("/api/maintenance/request?cell_id=1", headers=_auth_header(op_token))
+    client.post("/api/maintenance/request?cell_id=3", headers=_auth_header(op_token))
+
+    maint_token = _make_token("luc_maint", "MAINTENANCE")
+    resp = client.get(
+        "/api/maintenance/history?cell_id=1", headers=_auth_header(maint_token)
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["status"] == "ok"
+    assert len(body["history"]) > 0
+    assert all(item["cell_id"] == 1 for item in body["history"])
+    assert not any("Cellule 3" in item.get("action", "") for item in body["history"])
+
+
+def test_read_cell_detail_serves_html(client: TestClient) -> None:
+    resp = client.get("/cell/1")
+    assert resp.status_code == 200
+    assert "text/html" in resp.headers.get("content-type", "")
+
+
+def test_read_maintenance_history_page_serves_html(client: TestClient) -> None:
+    resp = client.get("/historique-maintenance")
+    assert resp.status_code == 200
+    assert "text/html" in resp.headers.get("content-type", "")
+
+
+def test_read_fault_history_page_serves_html(client: TestClient) -> None:
+    resp = client.get("/historique-pannes")
+    assert resp.status_code == 200
+    assert "text/html" in resp.headers.get("content-type", "")
+
+
+def test_read_data_comparison_page_serves_html(client: TestClient) -> None:
+    resp = client.get("/donnees")
+    assert resp.status_code == 200
+    assert "text/html" in resp.headers.get("content-type", "")
+
+
+def test_static_chart_js_is_served_locally(client: TestClient) -> None:
+    """Chart.js doit être servi localement (pas via un CDN externe) : un poste
+    de supervision industrielle peut tourner sans accès Internet sortant."""
+    resp = client.get("/static/chart.umd.js")
+    assert resp.status_code == 200
+    assert "Chart" in resp.text
+
+
+def test_get_cell_axes_forbidden_for_operator(client: TestClient) -> None:
+    token = _make_token("jean_ope", "OPERATEUR")
+    resp = client.get("/api/cell/1/axes", headers=_auth_header(token))
+    assert resp.status_code == 403
+
+
+def test_get_cell_axes_ok(monkeypatch: pytest.MonkeyPatch, client: TestClient) -> None:
+    async def _fake_fetch_axis_data(_cell_id: int) -> list[dict[str, Any]]:
+        return [
+            {
+                "axe": i,
+                "temperature_c": 30.0 + i,
+                "courant_a": 1.0 + i * 0.1,
+                "couple_nm": 5.0 + i,
+            }
+            for i in range(1, 7)
+        ]
+
+    monkeypatch.setattr(web_server, "fetch_axis_data", _fake_fetch_axis_data)
+    token = _make_token("luc_maint", "MAINTENANCE")
+    resp = client.get("/api/cell/1/axes", headers=_auth_header(token))
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["status"] == "ok"
+    assert len(body["axes"]) == 6
+    assert body["axes"][0]["axe"] == 1
+
+
+def test_get_cell_measures_ok(client: TestClient) -> None:
+    with Session(db.engine) as session:
+        db.add_axis_measure(
+            session,
+            cellule_id=7,
+            axe=1,
+            temperature_c=41.0,
+            courant_a=1.2,
+            couple_nm=8.0,
+            horodatage="2026-08-19 08:00:00",
+        )
+        db.add_cell_measure(
+            session,
+            cellule_id=7,
+            pneumatic_pressure_bar=6.0,
+            lubrix_level_pct=80.0,
+            horodatage="2026-08-19 08:00:00",
+        )
+
+    token = _make_token("luc_maint", "MAINTENANCE")
+    # hours volontairement énorme pour couvrir la mesure insérée ci-dessus
+    # quelle que soit la date système au moment du test.
+    resp = client.get("/api/cell/7/measures?hours=999999", headers=_auth_header(token))
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["status"] == "ok"
+    assert len(body["axis_measures"]) == 1
+    assert body["axis_measures"][0]["temperature_c"] == 41.0
+    assert len(body["cell_measures"]) == 1
+    assert body["cell_measures"][0]["pneumatic_pressure_bar"] == 6.0
+
+
+def test_get_cell_measures_forbidden_for_operator(client: TestClient) -> None:
+    token = _make_token("jean_ope", "OPERATEUR")
+    resp = client.get("/api/cell/1/measures", headers=_auth_header(token))
+    assert resp.status_code == 403
+
+
+def test_get_faults_history_ok(client: TestClient) -> None:
+    with Session(db.engine) as session:
+        db.add_defaut(
+            session,
+            cellule_id=8,
+            type_defaut="Test défaut historique",
+            severite="critique",
+            description="Créé par test_get_faults_history_ok",
+            horodatage="2026-08-19 08:00:00",
+        )
+
+    token = _make_token("luc_maint", "MAINTENANCE")
+    resp = client.get("/api/faults/history?cell_id=8", headers=_auth_header(token))
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["status"] == "ok"
+    assert any(f["type"] == "Test défaut historique" for f in body["faults"])
+
+
+def test_get_faults_history_forbidden_for_operator(client: TestClient) -> None:
+    token = _make_token("jean_ope", "OPERATEUR")
+    resp = client.get("/api/faults/history", headers=_auth_header(token))
+    assert resp.status_code == 403
+
+
+def test_simu_action_force_fault_then_ack_fault_updates_db(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class _FakeNode:
+        async def get_child(self, *_args: Any, **_kwargs: Any) -> _FakeNode:
+            return self
+
+        async def write_value(self, *_args: Any, **_kwargs: Any) -> None:
+            return None
+
+    class _FakeClient:
+        def __init__(self, url: str):
+            self.url = url
+            self.nodes = type("_Nodes", (), {"objects": _FakeNode()})()
+
+        async def __aenter__(self) -> _FakeClient:
+            return self
+
+        async def __aexit__(self, *_exc: Any) -> None:
+            return None
+
+        async def get_namespace_index(self, *_args: Any, **_kwargs: Any) -> int:
+            return 2
+
+    monkeypatch.setattr(opcua_client, "Client", _FakeClient)
+    client = TestClient(web_server.app)
+    token = _make_token("luc_maint", "MAINTENANCE")
+
+    resp = client.post(
+        "/api/simu/action?cell_id=42&action=force_fault",
+        headers=_auth_header(token),
+    )
+    assert resp.status_code == 200
+
+    with Session(db.engine) as session:
+        faults = db.list_defauts(session, cellule_id=42)
+    assert len(faults) == 1
+    assert faults[0].resolu is False
+    assert faults[0].severite == "critique"
+
+    resp = client.post(
+        "/api/simu/action?cell_id=42&action=ack_fault",
+        headers=_auth_header(token),
+    )
+    assert resp.status_code == 200
+
+    with Session(db.engine) as session:
+        faults = db.list_defauts(session, cellule_id=42)
+    assert faults[0].resolu is True
+
+
+def test_fetch_axis_data_success(monkeypatch: pytest.MonkeyPatch) -> None:
+    class _ReadVar:
+        def __init__(self, value: Any):
+            self._value = value
+
+        async def read_value(self) -> Any:
+            return self._value
+
+    class _AxeNode:
+        def __init__(self, axe_num: int):
+            self._axe_num = axe_num
+
+        async def get_child(self, child: str) -> _ReadVar:
+            name = child.split(":", 1)[1] if ":" in child else child
+            mapping: dict[str, Any] = {
+                "Temperature": 30.0 + self._axe_num,
+                "Courant": 1.0 + self._axe_num * 0.1,
+                "Couple": 5.0 + self._axe_num,
+            }
+            return _ReadVar(mapping[name])
+
+    class _CellNode:
+        async def get_child(self, child: str) -> _AxeNode:
+            name = child.split(":", 1)[1] if ":" in child else child
+            axe_num = int(name.rsplit("_", 1)[1])
+            return _AxeNode(axe_num)
+
+    class _ObjectsNode:
+        async def get_child(self, _path: list[str]) -> _CellNode:
+            return _CellNode()
+
+    class _FakeClient:
+        def __init__(self, url: str):
+            self.url = url
+            self.nodes = type("_Nodes", (), {"objects": _ObjectsNode()})()
+
+        async def __aenter__(self) -> _FakeClient:
+            return self
+
+        async def __aexit__(self, *_exc: Any) -> None:
+            return None
+
+        async def get_namespace_index(self, *_args: Any, **_kwargs: Any) -> int:
+            return 2
+
+    monkeypatch.setattr(opcua_client, "Client", _FakeClient)
+    data = asyncio.run(opcua_client.fetch_axis_data(1))
+    assert len(data) == 6
+    assert data[0]["axe"] == 1
+    assert data[0]["temperature_c"] == 31.0
+    assert data[5]["axe"] == 6
+
+
+def test_fetch_axis_data_connection_failure_returns_empty_list(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class _FailingClient:
+        def __init__(self, url: str):
+            self.url = url
+
+        async def __aenter__(self) -> _FailingClient:
+            raise RuntimeError("opcua down")
+
+        async def __aexit__(self, *_exc: Any) -> None:
+            return None
+
+    monkeypatch.setattr(opcua_client, "Client", _FailingClient)
+    data = asyncio.run(opcua_client.fetch_axis_data(1))
+    assert data == []
+
+
+def test_load_ssl_cert_expiry_reads_real_sandbox_cert() -> None:
+    """Vérifie que le parsing du certificat réel (cryptography.x509) fonctionne.
+
+    Le certificat présent dans certs/web_cert.pem de cet environnement est un
+    certificat de test généré localement, mais la fonction sous test lit et
+    parse un vrai fichier PEM x509 exactement comme elle le ferait en
+    production : ce test valide donc le chemin réel, pas une valeur simulée.
+    """
+
+    expiry = web_server._load_ssl_cert_expiry()  # pylint: disable=protected-access
+    assert expiry is not None
+    # Lève ValueError si le format n'est pas "YYYY-MM-DD" : le test échoue alors.
+    datetime.strptime(expiry, "%Y-%m-%d")
+
+
+def test_load_ssl_cert_expiry_returns_none_on_parse_failure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def _boom(*_args: Any, **_kwargs: Any) -> Any:
+        raise ValueError("certificat illisible (test)")
+
+    monkeypatch.setattr(web_server.x509, "load_pem_x509_certificate", _boom)
+    assert (
+        web_server._load_ssl_cert_expiry() is None
+    )  # pylint: disable=protected-access
+
+
+def test_simu_action_returns_500_when_opcua_write_fails(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def _failing_apply(_cell_id: int, _action: str) -> None:
+        raise RuntimeError("écriture OPC UA impossible (test)")
+
+    monkeypatch.setattr(web_server, "apply_simulated_action", _failing_apply)
+    client = TestClient(web_server.app)
+    token = _make_token("luc_maint", "MAINTENANCE")
+
+    resp = client.post(
+        "/api/simu/action?cell_id=1&action=force_fault",
+        headers=_auth_header(token),
+    )
+    assert resp.status_code == 500
+    assert "écriture OPC UA impossible" in resp.json()["detail"]
+
+
+def test_sampling_loop_persists_one_iteration_then_stops(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Vérifie le corps réel de _sampling_loop (persistance axes + cellule).
+
+    La boucle est infinie (while True + asyncio.sleep) par conception : pour
+    la tester sans bloquer, on remplace asyncio.sleep par une exception
+    "sentinelle" qui met fin proprement à la boucle juste après la première
+    itération, une fois les écritures en base effectuées.
+    """
+
+    async def _fake_fetch_opcua_data() -> list[dict[str, Any]]:
+        return [
+            {
+                "id": 9,
+                "pneumatic_pressure": 6.4,
+                "lubrix_level": 77.0,
+            }
+        ]
+
+    async def _fake_fetch_axis_data(_cell_id: int) -> list[dict[str, Any]]:
+        return [
+            {"axe": 1, "temperature_c": 33.0, "courant_a": 1.1, "couple_nm": 9.0},
+        ]
+
+    class _StopLoop(Exception):
+        pass
+
+    async def _sleep_once_then_stop(_seconds: float) -> None:
+        raise _StopLoop()
+
+    monkeypatch.setattr(web_server, "fetch_opcua_data", _fake_fetch_opcua_data)
+    monkeypatch.setattr(web_server, "fetch_axis_data", _fake_fetch_axis_data)
+    monkeypatch.setattr(web_server.asyncio, "sleep", _sleep_once_then_stop)
+
+    with pytest.raises(_StopLoop):
+        asyncio.run(web_server._sampling_loop())  # pylint: disable=protected-access
+
+    with Session(db.engine) as session:
+        cell_measures = db.list_cell_measures(
+            session, cellule_id=9, since="2000-01-01 00:00:00"
+        )
+        axis_measures = db.list_axis_measures(
+            session, cellule_id=9, since="2000-01-01 00:00:00"
+        )
+
+    assert len(cell_measures) == 1
+    assert cell_measures[0].pneumatic_pressure_bar == 6.4
+    assert len(axis_measures) == 1
+    assert axis_measures[0].temperature_c == 33.0
+
+
+def test_sampling_loop_survives_fetch_error_and_retries(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Une itération en échec (OPC UA indisponible) ne doit pas arrêter la
+    boucle de fond : elle est journalisée puis on retente au tour suivant.
+    """
+
+    async def _failing_fetch() -> list[dict[str, Any]]:
+        raise RuntimeError("OPC UA indisponible (test)")
+
+    class _StopLoop(Exception):
+        pass
+
+    async def _sleep_once_then_stop(_seconds: float) -> None:
+        raise _StopLoop()
+
+    monkeypatch.setattr(web_server, "fetch_opcua_data", _failing_fetch)
+    monkeypatch.setattr(web_server.asyncio, "sleep", _sleep_once_then_stop)
+
+    # La boucle doit atteindre asyncio.sleep (donc lever _StopLoop) malgré
+    # l'échec de fetch_opcua_data, preuve que l'exception a été absorbée.
+    with pytest.raises(_StopLoop):
+        asyncio.run(web_server._sampling_loop())  # pylint: disable=protected-access
+
+
+def test_lifespan_starts_and_cancels_sampling_task(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    started = asyncio.Event()
+    cancelled = asyncio.Event()
+
+    async def _fake_sampling_loop() -> None:
+        started.set()
+        try:
+            await asyncio.sleep(3600)
+        except asyncio.CancelledError:
+            cancelled.set()
+            raise
+
+    monkeypatch.setattr(web_server, "_sampling_loop", _fake_sampling_loop)
+
+    async def _run() -> None:
+        async with web_server.lifespan(web_server.app):
+            await asyncio.wait_for(started.wait(), timeout=1)
+        await asyncio.wait_for(cancelled.wait(), timeout=1)
+
+    asyncio.run(_run())
