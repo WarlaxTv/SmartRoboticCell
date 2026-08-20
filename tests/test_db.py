@@ -215,7 +215,7 @@ def test_add_defaut_and_list_defauts_most_recent_first() -> None:
     assert len(faults) == 2
     # Le plus récent (par id croissant / insertion) doit arriver en premier.
     assert faults[0].type_defaut == "Collision détectée"
-    assert faults[0].resolu is False
+    assert faults[0].statut == db.DEFAUT_STATUT_ACTIF
 
 
 def test_resolve_last_defaut_marks_most_recent_unresolved_as_resolved() -> None:
@@ -244,12 +244,12 @@ def test_resolve_last_defaut_marks_most_recent_unresolved_as_resolved() -> None:
 
     assert resolved is not None
     assert resolved.type_defaut == "Défaut récent"
-    assert resolved.resolu is True
+    assert resolved.statut == db.DEFAUT_STATUT_RESOLU
 
     with Session(db.engine) as session:
         faults = db.list_defauts(session, cellule_id=5)
 
-    still_unresolved = [f for f in faults if not f.resolu]
+    still_unresolved = [f for f in faults if f.statut != db.DEFAUT_STATUT_RESOLU]
     assert len(still_unresolved) == 1
     assert still_unresolved[0].type_defaut == "Défaut ancien"
 
@@ -283,3 +283,176 @@ def test_list_defauts_without_cell_filter_returns_all_cells() -> None:
         faults = db.list_defauts(session)
 
     assert {f.cellule_id for f in faults} >= {30, 31}
+
+
+def test_list_defauts_filters_by_statut_and_date_range() -> None:
+    db.init_db()
+
+    # On récupère les ids (valeurs primitives) plutôt que de garder les
+    # objets ORM d'une session déjà fermée : un objet SQLModel/SQLAlchemy est
+    # "expiré" par le commit() d'un appel ultérieur partageant la même
+    # session (même celui d'un *autre* défaut), et lever une exception dès
+    # qu'on relit un de ses attributs après coup (DetachedInstanceError).
+    with Session(db.engine) as session:
+        ancien_id = db.add_defaut(
+            session,
+            cellule_id=50,
+            type_defaut="Défaut ancien",
+            severite="avertissement",
+            description="...",
+            horodatage="2026-08-01 09:00:00",
+        ).id
+        recent_id = db.add_defaut(
+            session,
+            cellule_id=50,
+            type_defaut="Défaut récent",
+            severite="critique",
+            description="...",
+            horodatage="2026-08-19 09:00:00",
+        ).id
+
+    # On résout explicitement le récent (et laisse l'ancien "actif") pour que
+    # le scénario ne dépende pas de l'ordre implicite de resolve_last_defaut.
+    with Session(db.engine) as session:
+        db.set_defaut_statut(session, recent_id, db.DEFAUT_STATUT_RESOLU)
+
+    with Session(db.engine) as session:
+        actifs = db.list_defauts(session, cellule_id=50, statut=db.DEFAUT_STATUT_ACTIF)
+        resolus = db.list_defauts(
+            session, cellule_id=50, statut=db.DEFAUT_STATUT_RESOLU
+        )
+        depuis_le_10 = db.list_defauts(
+            session, cellule_id=50, since="2026-08-10 00:00:00"
+        )
+
+    assert {f.id for f in actifs} == {ancien_id}
+    assert {f.id for f in resolus} == {recent_id}
+    assert {f.id for f in depuis_le_10} == {recent_id}
+
+
+def test_list_history_filters_by_date_range() -> None:
+    db.init_db()
+
+    with Session(db.engine) as session:
+        entry = db.add_history_entry(
+            session,
+            action="Intervention filtrée par date",
+            username_auteur="luc_maint",
+            cellule_id=60,
+        )
+
+    with Session(db.engine) as session:
+        depuis_hier = db.list_history(
+            session, cellule_id=60, since="2000-01-01 00:00:00"
+        )
+        avant_creation = db.list_history(
+            session, cellule_id=60, until="2000-01-01 00:00:00"
+        )
+
+    assert any(e.id == entry.id for e in depuis_hier)
+    assert not any(e.id == entry.id for e in avant_creation)
+
+
+def test_get_defaut_returns_none_for_unknown_id() -> None:
+    db.init_db()
+    with Session(db.engine) as session:
+        assert db.get_defaut(session, 999999) is None
+
+
+def test_set_defaut_statut_updates_existing_defaut() -> None:
+    db.init_db()
+
+    with Session(db.engine) as session:
+        created = db.add_defaut(
+            session,
+            cellule_id=70,
+            type_defaut="Défaut pour set_defaut_statut",
+            severite="critique",
+            description="...",
+        )
+
+    with Session(db.engine) as session:
+        updated = db.set_defaut_statut(session, created.id, db.DEFAUT_STATUT_EN_COURS)
+
+    assert updated is not None
+    assert updated.statut == db.DEFAUT_STATUT_EN_COURS
+
+
+def test_add_maintenance_intervention_resolves_defaut_and_traces_author() -> None:
+    """Le coeur du workflow "Autre" de la TODO list : la Maintenance choisit
+    un défaut précis, déclare le problème résolu, et cela doit à la fois
+    créer une ligne d'historique traçable ET faire passer le défaut à
+    "resolu" — automatiquement, sans étape manuelle supplémentaire.
+    """
+
+    db.init_db()
+
+    with Session(db.engine) as session:
+        created = db.add_defaut(
+            session,
+            cellule_id=80,
+            type_defaut="Défaut pour intervention",
+            severite="critique",
+            description="...",
+        )
+
+    with Session(db.engine) as session:
+        entry = db.add_maintenance_intervention(
+            session,
+            username_auteur="luc_maint",
+            defaut_id=created.id,
+            notes="Remplacement du capteur.",
+            probleme_resolu=True,
+        )
+
+    assert entry.defaut_id == created.id
+    assert entry.probleme_resolu is True
+    assert entry.username_auteur == "luc_maint"
+    assert "Remplacement du capteur." in entry.action
+
+    with Session(db.engine) as session:
+        defaut = db.get_defaut(session, created.id)
+
+    assert defaut.statut == db.DEFAUT_STATUT_RESOLU
+
+
+def test_add_maintenance_intervention_keeps_defaut_en_cours_when_not_resolved() -> None:
+    db.init_db()
+
+    with Session(db.engine) as session:
+        created = db.add_defaut(
+            session,
+            cellule_id=81,
+            type_defaut="Défaut pris en charge mais pas résolu",
+            severite="avertissement",
+            description="...",
+        )
+
+    with Session(db.engine) as session:
+        entry = db.add_maintenance_intervention(
+            session,
+            username_auteur="luc_maint",
+            defaut_id=created.id,
+            notes="",
+            probleme_resolu=False,
+        )
+
+    assert entry.probleme_resolu is False
+
+    with Session(db.engine) as session:
+        defaut = db.get_defaut(session, created.id)
+
+    assert defaut.statut == db.DEFAUT_STATUT_EN_COURS
+
+
+def test_add_maintenance_intervention_rejects_unknown_defaut_id() -> None:
+    db.init_db()
+    with Session(db.engine) as session:
+        with pytest.raises(ValueError):
+            db.add_maintenance_intervention(
+                session,
+                username_auteur="luc_maint",
+                defaut_id=999999,
+                notes="",
+                probleme_resolu=True,
+            )

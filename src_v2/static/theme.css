@@ -206,19 +206,40 @@ a.btn, a.btn:hover, a.btn:visited { text-decoration: none; }
 .login-container input { width: 100%; padding: 12px 14px; margin: 8px 0; box-sizing: border-box; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--bg); font-size: 0.95em; }
 
 .history-panel { margin-top: 30px; background: var(--panel); padding: 22px; border-radius: var(--radius-lg); box-shadow: var(--shadow-card); }
-.history-item { padding: 10px 0; border-bottom: 1px solid var(--border); font-size: 0.9em; }
+.history-item { padding: 10px 0; border-bottom: 1px solid var(--border); font-size: 0.9em; display: flex; justify-content: space-between; align-items: flex-start; gap: 14px; flex-wrap: wrap; }
+.history-item-main { flex: 1; min-width: 220px; }
 .sev-critique { color: var(--fault); font-weight: 700; }
 .sev-avertissement { color: var(--warn); font-weight: 700; }
 .resolved-tag { color: var(--ok); font-size: 0.8em; margin-left: 6px; }
 .unresolved-tag { color: var(--fault); font-size: 0.8em; margin-left: 6px; }
+.status-en-cours-tag { color: var(--warn); font-size: 0.8em; margin-left: 6px; }
 
 .filter-bar { display: flex; gap: 10px; align-items: center; margin-bottom: 18px; flex-wrap: wrap; }
+.filter-bar-group { display: flex; align-items: center; gap: 6px; }
+.filter-bar-label { font-size: 0.85em; color: var(--muted); font-weight: 600; }
 .filter-bar select, .range-select, .filter-input {
     padding: 8px 12px; border-radius: 999px; border: 1px solid var(--border);
     background: white; font-size: 0.85em; font-weight: 600; color: var(--ink);
     cursor: pointer; font-family: inherit;
 }
 .filter-input { cursor: text; font-weight: 500; }
+.filter-input[type="date"] { font-weight: 600; }
+.filter-bar .btn-reset { background: var(--muted); }
+.filter-bar .btn-reset:hover { background: #57575c; }
+
+/* Bouton "Intervenir" sur un défaut actif/en cours (rôle MAINTENANCE) */
+.btn-intervene {
+    background: var(--nav-bg); padding: 5px 12px; font-size: 0.78em;
+    margin-left: 10px; flex-shrink: 0;
+}
+.btn-intervene:hover { background: var(--nav-bg-raised); }
+
+/* Bloc "demandes en attente" sur la page Historique Maintenance : défauts
+   actifs (= pas encore pris en charge par une intervention) affichés à côté
+   de l'historique des interventions déjà réalisées. */
+.pending-toggle-row { display: flex; align-items: center; gap: 8px; margin-bottom: 14px; font-size: 0.85em; color: var(--muted); font-weight: 600; }
+.pending-panel { margin-bottom: 22px; }
+.pending-panel .history-panel { margin-top: 12px; }
 
 .access-denied-box {
     background: var(--panel); border-radius: var(--radius-lg); box-shadow: var(--shadow-card);
@@ -258,6 +279,23 @@ a.btn, a.btn:hover, a.btn:visited { text-decoration: none; }
 .modal-body { padding: 20px; font-size: 0.92em; color: var(--ink); line-height: 1.5; }
 .modal-footer { padding: 0 20px 18px 20px; display: flex; justify-content: flex-end; gap: 10px; }
 .modal-footer .btn.secondary { background: var(--muted); }
+
+/* ---------- Formulaire d'intervention (popup "Intervenir sur un défaut") -- */
+
+.form-field { margin-bottom: 14px; }
+.form-field label { display: block; font-size: 0.85em; font-weight: 600; color: var(--muted); margin-bottom: 6px; }
+.form-field textarea, .form-field input[type="text"] {
+    width: 100%; box-sizing: border-box; padding: 10px 12px; border: 1px solid var(--border);
+    border-radius: var(--radius-sm); background: var(--bg); font-size: 0.9em; font-family: inherit; resize: vertical;
+}
+.radio-choice { display: flex; flex-direction: column; gap: 8px; }
+.radio-choice label {
+    display: flex; align-items: center; gap: 8px; font-size: 0.9em; font-weight: 500;
+    color: var(--ink); cursor: pointer; padding: 8px 10px; border: 1px solid var(--border);
+    border-radius: var(--radius-sm); background: var(--bg);
+}
+.radio-choice input[type="radio"] { accent-color: var(--accent); width: 16px; height: 16px; }
+.radio-choice label.checked { border-color: var(--accent); background: #EAF3FF; }
 
 /* ---------- Agrandissement d'un graphique (courbes) ---------- */
 

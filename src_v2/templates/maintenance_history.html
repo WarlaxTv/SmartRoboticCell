@@ -23,6 +23,45 @@
             <h1 id="page-title">Historique des interventions Maintenance</h1>
         </div>
 
+        <div class="filter-bar">
+            <div class="filter-bar-group">
+                <label for="cell-filter" class="filter-bar-label" id="filter-cell-label">Cellule :</label>
+                <select id="cell-filter" onchange="fetchAll()">
+                    <option value="">Toutes</option>
+                    <option value="1">1</option>
+                    <option value="2">2</option>
+                    <option value="3">3</option>
+                </select>
+            </div>
+            <div class="filter-bar-group">
+                <label for="since-filter" class="filter-bar-label" id="filter-since-label">Du :</label>
+                <input type="date" id="since-filter" class="filter-input" onchange="fetchAll()">
+            </div>
+            <div class="filter-bar-group">
+                <label for="until-filter" class="filter-bar-label" id="filter-until-label">Au :</label>
+                <input type="date" id="until-filter" class="filter-input" onchange="fetchAll()">
+            </div>
+            <button class="btn btn-reset" id="filter-reset-btn" onclick="resetFilters()">Réinitialiser</button>
+        </div>
+
+        <div class="pending-panel">
+            <div class="pending-toggle-row">
+                <label>
+                    <input type="checkbox" id="pending-toggle" checked onchange="togglePendingVisibility()">
+                    <span id="pending-toggle-label">Afficher aussi les demandes d'intervention en attente</span>
+                </label>
+            </div>
+            <div id="pending-block">
+                <h3 id="pending-title" style="margin:0 0 8px 0; font-size:1em; color:#1D1D1F;">Demandes en attente</h3>
+                <div class="history-panel">
+                    <div id="pending-content">
+                        <p style="color:#6E6E73;" id="pending-loading-label">Chargement...</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <h3 id="history-title" style="margin:0 0 8px 0; font-size:1em; color:#1D1D1F;">Interventions réalisées</h3>
         <div class="history-panel">
             <div id="history-content">
                 <p style="color:#6E6E73;" id="loading-label">Chargement de l'historique...</p>
@@ -38,12 +77,38 @@
                 loading: "Chargement de l'historique...",
                 noInterventions: "<p>Aucune intervention demandée.</p>",
                 requestedBy: "Demandé par",
+                cellFilterLabel: "Cellule :",
+                sinceFilterLabel: "Du :",
+                untilFilterLabel: "Au :",
+                allCells: "Toutes",
+                resetFilters: "Réinitialiser",
+                pendingToggleLabel: "Afficher aussi les demandes d'intervention en attente",
+                pendingTitle: "Demandes en attente",
+                pendingLoading: "Chargement...",
+                noPending: "<p>Aucune demande en attente.</p>",
+                historyTitle: "Interventions réalisées",
+                onDefaut: "sur le défaut",
+                outcomeResolved: "résolu",
+                outcomeOngoing: "reste actif",
             },
             en: {
                 pageTitle: "Maintenance Intervention History",
                 loading: "Loading history...",
                 noInterventions: "<p>No interventions requested.</p>",
                 requestedBy: "Requested by",
+                cellFilterLabel: "Cell:",
+                sinceFilterLabel: "From:",
+                untilFilterLabel: "To:",
+                allCells: "All",
+                resetFilters: "Reset",
+                pendingToggleLabel: "Also show pending intervention requests",
+                pendingTitle: "Pending requests",
+                pendingLoading: "Loading...",
+                noPending: "<p>No pending request.</p>",
+                historyTitle: "Completed interventions",
+                onDefaut: "on fault",
+                outcomeResolved: "resolved",
+                outcomeOngoing: "still active",
             },
         };
 
@@ -59,15 +124,61 @@
             document.title = t('pageTitle');
             document.getElementById('page-title').innerText = t('pageTitle');
             document.getElementById('loading-label').innerText = t('loading');
+            document.getElementById('filter-cell-label').innerText = t('cellFilterLabel');
+            document.getElementById('filter-since-label').innerText = t('sinceFilterLabel');
+            document.getElementById('filter-until-label').innerText = t('untilFilterLabel');
+            document.getElementById('filter-reset-btn').innerText = t('resetFilters');
+            document.getElementById('cell-filter').options[0].innerText = t('allCells');
+            document.getElementById('pending-toggle-label').innerText = t('pendingToggleLabel');
+            document.getElementById('pending-title').innerText = t('pendingTitle');
+            document.getElementById('pending-loading-label').innerText = t('pendingLoading');
+            document.getElementById('history-title').innerText = t('historyTitle');
+            for (const cellId of [1, 2, 3]) {
+                const opt = document.querySelector(`#cell-filter option[value="${cellId}"]`);
+                if (opt) opt.innerText = cellDisplayName(cellId);
+            }
             document.getElementById('access-denied-title').innerText = navT('accessDeniedTitle');
             document.getElementById('access-denied-body').innerText = navT('accessDeniedBody');
             document.getElementById('access-denied-back').innerText = navT('accessDeniedBack');
             renderTopNav('maint-history', currentRole);
         }
 
+        function resetFilters() {
+            document.getElementById('cell-filter').value = '';
+            document.getElementById('since-filter').value = '';
+            document.getElementById('until-filter').value = '';
+            fetchAll();
+        }
+
+        function togglePendingVisibility() {
+            const show = document.getElementById('pending-toggle').checked;
+            document.getElementById('pending-block').classList.toggle('hidden', !show);
+        }
+
+        function buildQuery() {
+            const params = new URLSearchParams();
+            const cellId = document.getElementById('cell-filter').value;
+            const since = document.getElementById('since-filter').value;
+            const until = document.getElementById('until-filter').value;
+            if (cellId) params.set('cell_id', cellId);
+            if (since) params.set('since', `${since} 00:00:00`);
+            if (until) params.set('until', `${until} 23:59:59`);
+            return params;
+        }
+
+        function outcomeTag(item) {
+            if (item.probleme_resolu === true) {
+                return `<span class="resolved-tag">(${t('onDefaut')} #${item.defaut_id} — ${t('outcomeResolved')})</span>`;
+            }
+            if (item.probleme_resolu === false) {
+                return `<span class="status-en-cours-tag">(${t('onDefaut')} #${item.defaut_id} — ${t('outcomeOngoing')})</span>`;
+            }
+            return '';
+        }
+
         async function fetchHistory() {
             try {
-                const response = await fetch('/api/maintenance/history', {
+                const response = await fetch(`/api/maintenance/history?${buildQuery().toString()}`, {
                     headers: { 'Authorization': `Bearer ${token}` },
                 });
                 const data = await response.json();
@@ -76,12 +187,38 @@
                     if (data.history.length === 0) {
                         container.innerHTML = t('noInterventions');
                     } else {
-                        container.innerHTML = data.history.reverse().map(h =>
-                            `<div class="history-item"><strong>${h.time}</strong> : ${h.action} <em>(${t('requestedBy')} ${h.user})</em></div>`
+                        container.innerHTML = data.history.slice().reverse().map(h =>
+                            `<div class="history-item"><div class="history-item-main"><strong>${h.time}</strong> — ${cellDisplayName(h.cell_id)} : ${h.action} <em>(${t('requestedBy')} ${h.user})</em> ${outcomeTag(h)}</div></div>`
                         ).join('');
                     }
                 }
             } catch (e) { console.error(e); }
+        }
+
+        async function fetchPending() {
+            try {
+                const params = buildQuery();
+                params.set('fault_status', 'actif');
+                const response = await fetch(`/api/faults/history?${params.toString()}`, {
+                    headers: { 'Authorization': `Bearer ${token}` },
+                });
+                const data = await response.json();
+                if (data.status === 'ok') {
+                    const container = document.getElementById('pending-content');
+                    if (data.faults.length === 0) {
+                        container.innerHTML = t('noPending');
+                    } else {
+                        container.innerHTML = data.faults.map(f =>
+                            `<div class="history-item"><div class="history-item-main"><strong>${f.time}</strong> — ${cellDisplayName(f.cell_id)} — <span class="sev-${f.severity}">${f.type}</span><div style="color:#6E6E73;">${f.description}</div></div></div>`
+                        ).join('');
+                    }
+                }
+            } catch (e) { console.error(e); }
+        }
+
+        function fetchAll() {
+            fetchHistory();
+            fetchPending();
         }
 
         if (!token) {
@@ -92,8 +229,8 @@
         } else {
             applyLanguage();
             document.getElementById('page-content').classList.remove('hidden');
-            fetchHistory();
-            setInterval(fetchHistory, 5000);
+            fetchAll();
+            setInterval(fetchAll, 5000);
         }
     </script>
 </body>

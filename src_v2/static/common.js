@@ -8,6 +8,36 @@
  * etc.) et appelle les fonctions ci-dessous pour tout ce qui est commun.
  */
 
+/* Noms des 3 cellules, tels qu'exposés par le serveur OPC UA simulé
+ * (src_v2/opcua_server.py, variable cell_names) : fixes pour ce POC à 3
+ * cellules. Dupliqués ici (plutôt que récupérés via /api/status) pour que
+ * les pages d'historique (fault_history.html, maintenance_history.html)
+ * puissent afficher un menu de filtre lisible sans dépendre d'un appel API
+ * supplémentaire ni d'un rôle OPERATEUR/MAINTENANCE particulier. */
+const CELL_NAMES = {
+    1: "PERÇAGE AÉRO",
+    2: "ASSEMBLAGE",
+    3: "CONTRÔLE QUALITÉ",
+};
+
+function cellDisplayName(cellId) {
+    const name = CELL_NAMES[cellId];
+    return name ? `#${cellId} — ${name}` : `#${cellId}`;
+}
+
+/* Statut d'un DefautHistorique (voir src_v2/db.py) : "actif" (pas encore
+ * pris en charge, = demande d'intervention implicite), "en_cours" (une
+ * intervention a eu lieu mais le problème persiste) ou "resolu". */
+const FAULT_STATUS_TAG_CLASS = {
+    actif: "unresolved-tag",
+    en_cours: "status-en-cours-tag",
+    resolu: "resolved-tag",
+};
+
+function faultStatusTagClass(status) {
+    return FAULT_STATUS_TAG_CLASS[status] || "unresolved-tag";
+}
+
 const NAV_I18N = {
     fr: {
         navMenu: "Menu",

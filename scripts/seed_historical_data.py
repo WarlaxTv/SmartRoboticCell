@@ -241,7 +241,7 @@ def _seed_faults() -> int:
                 type_defaut=type_defaut,
                 severite=severite,
                 description=f"{type_defaut} — Cellule {cell_id} {SEED_MARKER}",
-                resolu=True,
+                statut=db.DEFAUT_STATUT_RESOLU,
             )
             session.add(entry)
             count += 1
@@ -268,8 +268,8 @@ def _resolve_seeded_faults() -> int:
             )
         )
         for row in rows:
-            if not row.resolu:
-                row.resolu = True
+            if row.statut != db.DEFAUT_STATUT_RESOLU:
+                row.statut = db.DEFAUT_STATUT_RESOLU
                 session.add(row)
                 count += 1
         session.commit()

@@ -24,13 +24,33 @@
         </div>
 
         <div class="filter-bar">
-            <label for="cell-filter" id="filter-label" style="font-size:0.85em; color:#6E6E73; font-weight:600;">Cellule :</label>
-            <select id="cell-filter" onchange="fetchFaults()">
-                <option value="">Toutes</option>
-                <option value="1">1</option>
-                <option value="2">2</option>
-                <option value="3">3</option>
-            </select>
+            <div class="filter-bar-group">
+                <label for="cell-filter" class="filter-bar-label" id="filter-cell-label">Cellule :</label>
+                <select id="cell-filter" onchange="fetchFaults()">
+                    <option value="">Toutes</option>
+                    <option value="1">1</option>
+                    <option value="2">2</option>
+                    <option value="3">3</option>
+                </select>
+            </div>
+            <div class="filter-bar-group">
+                <label for="status-filter" class="filter-bar-label" id="filter-status-label">État :</label>
+                <select id="status-filter" onchange="fetchFaults()">
+                    <option value="">Tous</option>
+                    <option value="actif">Actif</option>
+                    <option value="en_cours">En cours</option>
+                    <option value="resolu">Résolu</option>
+                </select>
+            </div>
+            <div class="filter-bar-group">
+                <label for="since-filter" class="filter-bar-label" id="filter-since-label">Du :</label>
+                <input type="date" id="since-filter" class="filter-input" onchange="fetchFaults()">
+            </div>
+            <div class="filter-bar-group">
+                <label for="until-filter" class="filter-bar-label" id="filter-until-label">Au :</label>
+                <input type="date" id="until-filter" class="filter-input" onchange="fetchFaults()">
+            </div>
+            <button class="btn btn-reset" id="filter-reset-btn" onclick="resetFilters()">Réinitialiser</button>
         </div>
 
         <div class="history-panel">
@@ -40,6 +60,38 @@
         </div>
     </main>
 
+    <!-- Popup "Intervenir sur un défaut" (rôle MAINTENANCE uniquement) -->
+    <div id="intervention-modal-overlay" class="modal-overlay">
+        <div class="modal-box">
+            <div class="modal-header">
+                <span id="intervention-modal-title">Enregistrer une intervention</span>
+            </div>
+            <div class="modal-body">
+                <div class="form-field">
+                    <label id="intervention-outcome-label">Résultat</label>
+                    <div class="radio-choice">
+                        <label id="intervention-radio-resolved-label">
+                            <input type="radio" name="intervention-outcome" value="resolved" checked onchange="updateInterventionRadioStyle()">
+                            <span id="intervention-radio-resolved-text">Problème résolu</span>
+                        </label>
+                        <label id="intervention-radio-ongoing-label">
+                            <input type="radio" name="intervention-outcome" value="ongoing" onchange="updateInterventionRadioStyle()">
+                            <span id="intervention-radio-ongoing-text">Pris en charge, reste actif</span>
+                        </label>
+                    </div>
+                </div>
+                <div class="form-field">
+                    <label for="intervention-notes" id="intervention-notes-label">Notes (optionnel)</label>
+                    <textarea id="intervention-notes" rows="3"></textarea>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn secondary" id="intervention-cancel-btn" onclick="closeInterventionModal()">Annuler</button>
+                <button class="btn" id="intervention-submit-btn" onclick="submitIntervention()">Valider</button>
+            </div>
+        </div>
+    </div>
+
     <script src="/static/common.js"></script>
     <script>
         const I18N = {
@@ -47,47 +99,140 @@
                 pageTitle: "Historique des défauts",
                 loading: "Chargement...",
                 noFaults: "Aucun défaut enregistré.",
-                resolved: "résolu",
-                unresolved: "actif",
+                statusActif: "actif",
+                statusEnCours: "en cours",
+                statusResolu: "résolu",
                 allCells: "Toutes",
+                allStatuses: "Tous",
                 cellFilterLabel: "Cellule :",
+                statusFilterLabel: "État :",
+                sinceFilterLabel: "Du :",
+                untilFilterLabel: "Au :",
+                resetFilters: "Réinitialiser",
+                intervene: "Intervenir",
+                interventionModalTitle: "Enregistrer une intervention",
+                interventionOutcomeLabel: "Résultat",
+                interventionResolved: "Problème résolu",
+                interventionOngoing: "Pris en charge, reste actif",
+                interventionNotesLabel: "Notes (optionnel)",
+                interventionCancel: "Annuler",
+                interventionSubmit: "Valider",
+                interventionSuccess: "Intervention enregistrée.",
+                interventionError: "Impossible d'enregistrer l'intervention.",
             },
             en: {
                 pageTitle: "Fault History",
                 loading: "Loading...",
                 noFaults: "No fault recorded.",
-                resolved: "resolved",
-                unresolved: "active",
+                statusActif: "active",
+                statusEnCours: "in progress",
+                statusResolu: "resolved",
                 allCells: "All",
+                allStatuses: "All",
                 cellFilterLabel: "Cell:",
+                statusFilterLabel: "Status:",
+                sinceFilterLabel: "From:",
+                untilFilterLabel: "To:",
+                resetFilters: "Reset",
+                intervene: "Intervene",
+                interventionModalTitle: "Record an intervention",
+                interventionOutcomeLabel: "Outcome",
+                interventionResolved: "Problem resolved",
+                interventionOngoing: "Taken care of, still active",
+                interventionNotesLabel: "Notes (optional)",
+                interventionCancel: "Cancel",
+                interventionSubmit: "Submit",
+                interventionSuccess: "Intervention recorded.",
+                interventionError: "Could not record the intervention.",
             },
         };
 
         const token = localStorage.getItem('jwt_token');
         const currentRole = localStorage.getItem('user_role');
+        let interventionTargetDefautId = null;
 
         function t(key) {
             const lang = navLang();
             return (I18N[lang] && I18N[lang][key]) || I18N.fr[key] || key;
         }
 
+        function statusLabel(faultStatus) {
+            if (faultStatus === 'resolu') return t('statusResolu');
+            if (faultStatus === 'en_cours') return t('statusEnCours');
+            return t('statusActif');
+        }
+
         function applyLanguage() {
             document.title = t('pageTitle');
             document.getElementById('page-title').innerText = t('pageTitle');
             document.getElementById('loading-label').innerText = t('loading');
-            document.getElementById('filter-label').innerText = t('cellFilterLabel');
+            document.getElementById('filter-cell-label').innerText = t('cellFilterLabel');
+            document.getElementById('filter-status-label').innerText = t('statusFilterLabel');
+            document.getElementById('filter-since-label').innerText = t('sinceFilterLabel');
+            document.getElementById('filter-until-label').innerText = t('untilFilterLabel');
+            document.getElementById('filter-reset-btn').innerText = t('resetFilters');
             document.getElementById('cell-filter').options[0].innerText = t('allCells');
+            document.getElementById('status-filter').options[0].innerText = t('allStatuses');
+            document.getElementById('status-filter').options[1].innerText = t('statusActif');
+            document.getElementById('status-filter').options[2].innerText = t('statusEnCours');
+            document.getElementById('status-filter').options[3].innerText = t('statusResolu');
+            document.getElementById('intervention-modal-title').innerText = t('interventionModalTitle');
+            document.getElementById('intervention-outcome-label').innerText = t('interventionOutcomeLabel');
+            document.getElementById('intervention-radio-resolved-text').innerText = t('interventionResolved');
+            document.getElementById('intervention-radio-ongoing-text').innerText = t('interventionOngoing');
+            document.getElementById('intervention-notes-label').innerText = t('interventionNotesLabel');
+            document.getElementById('intervention-cancel-btn').innerText = t('interventionCancel');
+            document.getElementById('intervention-submit-btn').innerText = t('interventionSubmit');
+            // Menu de filtre "joli" : nom de cellule affiché, pas seulement un numéro.
+            for (const cellId of [1, 2, 3]) {
+                const opt = document.querySelector(`#cell-filter option[value="${cellId}"]`);
+                if (opt) opt.innerText = cellDisplayName(cellId);
+            }
             document.getElementById('access-denied-title').innerText = navT('accessDeniedTitle');
             document.getElementById('access-denied-body').innerText = navT('accessDeniedBody');
             document.getElementById('access-denied-back').innerText = navT('accessDeniedBack');
             renderTopNav('fault-history', currentRole);
         }
 
+        function resetFilters() {
+            document.getElementById('cell-filter').value = '';
+            document.getElementById('status-filter').value = '';
+            document.getElementById('since-filter').value = '';
+            document.getElementById('until-filter').value = '';
+            fetchFaults();
+        }
+
+        function buildFaultsQuery() {
+            const params = new URLSearchParams();
+            const cellId = document.getElementById('cell-filter').value;
+            const statusVal = document.getElementById('status-filter').value;
+            const since = document.getElementById('since-filter').value;
+            const until = document.getElementById('until-filter').value;
+            if (cellId) params.set('cell_id', cellId);
+            if (statusVal) params.set('fault_status', statusVal);
+            if (since) params.set('since', `${since} 00:00:00`);
+            if (until) params.set('until', `${until} 23:59:59`);
+            const qs = params.toString();
+            return qs ? `?${qs}` : '';
+        }
+
+        function renderFaultRow(f) {
+            const canIntervene = currentRole === 'MAINTENANCE' && f.fault_status !== 'resolu';
+            const interveneBtn = canIntervene
+                ? `<button class="btn btn-intervene" onclick="openInterventionModal(${f.id})">${t('intervene')}</button>`
+                : '';
+            return `<div class="history-item">
+                <div class="history-item-main">
+                    <strong>${f.time}</strong> — ${cellDisplayName(f.cell_id)} — <span class="sev-${f.severity}">${f.type}</span><span class="${faultStatusTagClass(f.fault_status)}">(${statusLabel(f.fault_status)})</span>
+                    <div style="color:#6E6E73;">${f.description}</div>
+                </div>
+                ${interveneBtn}
+            </div>`;
+        }
+
         async function fetchFaults() {
             try {
-                const cellId = document.getElementById('cell-filter').value;
-                const qs = cellId ? `?cell_id=${cellId}` : '';
-                const response = await fetch(`/api/faults/history${qs}`, {
+                const response = await fetch(`/api/faults/history${buildFaultsQuery()}`, {
                     headers: { 'Authorization': `Bearer ${token}` },
                 });
                 const data = await response.json();
@@ -96,12 +241,54 @@
                     if (data.faults.length === 0) {
                         container.innerHTML = t('noFaults');
                     } else {
-                        container.innerHTML = data.faults.map(f =>
-                            `<div class="history-item"><strong>${f.time}</strong> — Cellule ${f.cell_id} — <span class="sev-${f.severity}">${f.type}</span><span class="${f.resolved ? 'resolved-tag' : 'unresolved-tag'}">${f.resolved ? '(' + t('resolved') + ')' : '(' + t('unresolved') + ')'}</span><div style="color:#6E6E73;">${f.description}</div></div>`
-                        ).join('');
+                        container.innerHTML = data.faults.map(renderFaultRow).join('');
                     }
                 }
             } catch (e) { console.error(e); }
+        }
+
+        function openInterventionModal(defautId) {
+            interventionTargetDefautId = defautId;
+            document.getElementById('intervention-notes').value = '';
+            document.querySelector('input[name="intervention-outcome"][value="resolved"]').checked = true;
+            updateInterventionRadioStyle();
+            document.getElementById('intervention-modal-overlay').classList.add('open');
+        }
+
+        function closeInterventionModal() {
+            document.getElementById('intervention-modal-overlay').classList.remove('open');
+            interventionTargetDefautId = null;
+        }
+
+        function updateInterventionRadioStyle() {
+            document.querySelectorAll('.radio-choice label').forEach((label) => {
+                const input = label.querySelector('input[type="radio"]');
+                label.classList.toggle('checked', input.checked);
+            });
+        }
+
+        async function submitIntervention() {
+            if (interventionTargetDefautId === null) return;
+            const resolved = document.querySelector('input[name="intervention-outcome"]:checked').value === 'resolved';
+            const notes = document.getElementById('intervention-notes').value;
+            const params = new URLSearchParams({
+                defaut_id: interventionTargetDefautId,
+                probleme_resolu: resolved,
+                notes: notes,
+            });
+            try {
+                const response = await fetch(`/api/maintenance/intervention?${params.toString()}`, {
+                    method: 'POST',
+                    headers: { 'Authorization': `Bearer ${token}` },
+                });
+                if (!response.ok) throw new Error('request failed');
+                closeInterventionModal();
+                showModal(t('interventionSuccess'), 'success');
+                fetchFaults();
+            } catch (e) {
+                console.error(e);
+                showModal(t('interventionError'), 'error');
+            }
         }
 
         if (!token) {

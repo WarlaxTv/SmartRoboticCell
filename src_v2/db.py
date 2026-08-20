@@ -68,6 +68,17 @@ class HistoriqueMaintenance(SQLModel, table=True):
     # une ligne d'historique ne peut référencer qu'un utilisateur existant.
     username_auteur: str = Field(foreign_key="utilisateur.username")
     cellule_id: int
+    # Défaut concerné par cette action, quand elle en traite un précisément
+    # (formulaire "Enregistrer une intervention" de la page Historique des
+    # défauts). None pour les entrées génériques préexistantes (demande
+    # d'intervention depuis le dashboard, actions du panneau de simulation)
+    # qui ne visent pas un DefautHistorique en particulier.
+    defaut_id: int | None = Field(default=None, foreign_key="defauthistorique.id")
+    # État du problème tel que déclaré par la Maintenance à la clôture de
+    # cette action : True si résolu, False si pris en charge mais toujours
+    # actif, None si cette action ne clôt rien (simple demande, action du
+    # panneau de simulation).
+    probleme_resolu: bool | None = Field(default=None)
 
 
 class MesureAxe(SQLModel, table=True):
@@ -102,6 +113,19 @@ class MesureCellule(SQLModel, table=True):
     lubrix_level_pct: float
 
 
+# Les 3 états possibles d'un DefautHistorique.statut. "actif" est aussi,
+# implicitement, une demande d'intervention en attente : plutôt que de créer
+# une table séparée pour ce concept, un défaut actif *est* la demande tant
+# qu'aucune intervention ne l'a pris en charge (cf. journal des décisions,
+# CHG-V2-057) — une intervention qui ne résout pas le problème le fait
+# passer en "en_cours" (pris en charge, toujours actif), et seule une
+# intervention qui le déclare résolu le fait passer en "resolu".
+DEFAUT_STATUT_ACTIF = "actif"
+DEFAUT_STATUT_EN_COURS = "en_cours"
+DEFAUT_STATUT_RESOLU = "resolu"
+DEFAUT_STATUTS = (DEFAUT_STATUT_ACTIF, DEFAUT_STATUT_EN_COURS, DEFAUT_STATUT_RESOLU)
+
+
 class DefautHistorique(SQLModel, table=True):
     """Une ligne = un défaut survenu sur une cellule (distinct de l'historique
     de maintenance : ceci trace l'événement technique lui-même — type, gravité
@@ -114,7 +138,10 @@ class DefautHistorique(SQLModel, table=True):
     type_defaut: str
     severite: str  # "critique" ou "avertissement"
     description: str
-    resolu: bool = False
+    # "actif" (pas encore pris en charge = demande d'intervention implicite),
+    # "en_cours" (une intervention a eu lieu mais le problème persiste) ou
+    # "resolu". Remplace l'ancien booléen "resolu" (cf. CHG-V2-057).
+    statut: str = Field(default=DEFAUT_STATUT_ACTIF)
 
 
 # Hashs bcrypt réels (générés via la librairie bcrypt, pas des chaînes
@@ -163,15 +190,28 @@ def get_user(session: Session, username: str) -> Utilisateur | None:
 
 
 def add_history_entry(
-    session: Session, action: str, username_auteur: str, cellule_id: int
+    session: Session,
+    action: str,
+    username_auteur: str,
+    cellule_id: int,
+    defaut_id: int | None = None,
+    probleme_resolu: bool | None = None,
 ) -> HistoriqueMaintenance:
-    """Ajoute et persiste une ligne d'historique de maintenance."""
+    """Ajoute et persiste une ligne d'historique de maintenance.
+
+    ``defaut_id``/``probleme_resolu`` restent optionnels pour ne rien changer
+    au comportement des appelants existants (demande d'intervention depuis le
+    dashboard, actions du panneau de simulation) qui ne visent pas un défaut
+    précis.
+    """
 
     entry = HistoriqueMaintenance(
         horodatage=datetime.now(UTC).strftime("%Y-%m-%d %H:%M:%S"),
         action=action,
         username_auteur=username_auteur,
         cellule_id=cellule_id,
+        defaut_id=defaut_id,
+        probleme_resolu=probleme_resolu,
     )
     session.add(entry)
     session.commit()
@@ -180,18 +220,27 @@ def add_history_entry(
 
 
 def list_history(
-    session: Session, cellule_id: int | None = None
+    session: Session,
+    cellule_id: int | None = None,
+    since: str | None = None,
+    until: str | None = None,
 ) -> list[HistoriqueMaintenance]:
     """Retourne l'historique de maintenance, dans l'ordre chronologique.
 
-    Filtre sur une cellule si ``cellule_id`` est fourni, sinon retourne
-    l'historique de toutes les cellules (comportement inchangé pour les
-    appelants existants).
+    Filtre sur une cellule si ``cellule_id`` est fourni, et/ou sur une plage
+    de dates (bornes incluses, format identique à ``horodatage``) si
+    ``since``/``until`` sont fournis. Sans filtre, retourne l'historique
+    complet de toutes les cellules (comportement inchangé pour les appelants
+    existants).
     """
 
     query = select(HistoriqueMaintenance)
     if cellule_id is not None:
         query = query.where(HistoriqueMaintenance.cellule_id == cellule_id)
+    if since is not None:
+        query = query.where(HistoriqueMaintenance.horodatage >= since)
+    if until is not None:
+        query = query.where(HistoriqueMaintenance.horodatage <= until)
     query = query.order_by(HistoriqueMaintenance.id)
     return list(session.exec(query))
 
@@ -288,7 +337,7 @@ def add_defaut(
         type_defaut=type_defaut,
         severite=severite,
         description=description,
-        resolu=False,
+        statut=DEFAUT_STATUT_ACTIF,
     )
     session.add(entry)
     session.commit()
@@ -299,43 +348,129 @@ def add_defaut(
 def resolve_last_defaut(session: Session, cellule_id: int) -> DefautHistorique | None:
     """Marque le défaut non résolu le plus récent d'une cellule comme résolu.
 
-    Retourne l'entrée modifiée, ou None si aucun défaut non résolu n'existe
-    pour cette cellule.
+    Utilisé par l'action "ack_fault" du panneau de simulation (POC), qui ne
+    cible pas un défaut précis mais le plus récent non résolu de la cellule.
+    Pour clôturer un défaut précis avec traçabilité de qui/pourquoi, voir
+    ``add_maintenance_intervention``. Retourne l'entrée modifiée, ou None si
+    aucun défaut non résolu n'existe pour cette cellule.
     """
 
-    # SQLAlchemy/SQLModel exige "== False" (surcharge d'opérateur pour construire
-    # l'expression SQL) ; "is False" ou "not ..." ne fonctionnent pas ici. Et
     # DefautHistorique.id est un descripteur résolu à l'exécution : pylint
     # l'analyse statiquement comme un simple FieldInfo et ne voit donc pas sa
     # méthode .desc() (faux positif connu avec SQLModel).
-    # pylint: disable=singleton-comparison,no-member
+    # pylint: disable=no-member
     entry = session.exec(
         select(DefautHistorique)
         .where(DefautHistorique.cellule_id == cellule_id)
-        .where(DefautHistorique.resolu == False)  # noqa: E712
+        .where(DefautHistorique.statut != DEFAUT_STATUT_RESOLU)
         .order_by(DefautHistorique.id.desc())
     ).first()
-    # pylint: enable=singleton-comparison,no-member
+    # pylint: enable=no-member
     if entry is None:
         return None
-    entry.resolu = True
+    entry.statut = DEFAUT_STATUT_RESOLU
     session.add(entry)
     session.commit()
     session.refresh(entry)
     return entry
 
 
+def get_defaut(session: Session, defaut_id: int) -> DefautHistorique | None:
+    """Recherche un défaut par son identifiant."""
+
+    return session.get(DefautHistorique, defaut_id)
+
+
+def set_defaut_statut(
+    session: Session, defaut_id: int, statut: str
+) -> DefautHistorique | None:
+    """Force le statut d'un défaut précis. Retourne None si l'id est inconnu."""
+
+    entry = session.get(DefautHistorique, defaut_id)
+    if entry is None:
+        return None
+    entry.statut = statut
+    session.add(entry)
+    session.commit()
+    session.refresh(entry)
+    return entry
+
+
+def add_maintenance_intervention(
+    session: Session,
+    username_auteur: str,
+    defaut_id: int,
+    notes: str,
+    probleme_resolu: bool,
+) -> HistoriqueMaintenance:
+    """Enregistre une intervention de Maintenance sur un défaut précis.
+
+    Crée la ligne d'historique traçant qui est intervenu, sur quel défaut, et
+    avec quel résultat, ET met à jour le statut du défaut en conséquence :
+    "resolu" si ``probleme_resolu`` est vrai, "en_cours" sinon (pris en
+    charge mais toujours actif — cf. décision utilisateur CHG-V2-057).
+
+    Lève ValueError si ``defaut_id`` ne correspond à aucun défaut existant :
+    le contrôleur web_server.py traduit ceci en 404.
+    """
+
+    defaut = session.get(DefautHistorique, defaut_id)
+    if defaut is None:
+        raise ValueError(f"Défaut #{defaut_id} introuvable")
+
+    resultat_label = "résolu" if probleme_resolu else "toujours actif"
+    action = (
+        f"Intervention sur le défaut #{defaut_id} ({defaut.type_defaut}) "
+        f"— {resultat_label}"
+    )
+    if notes:
+        action = f"{action}. Notes : {notes}"
+
+    entry = add_history_entry(
+        session,
+        action=action,
+        username_auteur=username_auteur,
+        cellule_id=defaut.cellule_id,
+        defaut_id=defaut_id,
+        probleme_resolu=probleme_resolu,
+    )
+
+    defaut.statut = DEFAUT_STATUT_RESOLU if probleme_resolu else DEFAUT_STATUT_EN_COURS
+    session.add(defaut)
+    session.commit()
+    # Ce second commit expire (par défaut SQLAlchemy) tous les objets déjà
+    # chargés dans la session, y compris `entry` déjà retourné par
+    # add_history_entry ci-dessus : sans ce refresh, le premier accès à un
+    # attribut de `entry` par l'appelant lèverait DetachedInstanceError dès
+    # que la session appelante se referme.
+    session.refresh(entry)
+
+    return entry
+
+
 def list_defauts(
-    session: Session, cellule_id: int | None = None
+    session: Session,
+    cellule_id: int | None = None,
+    statut: str | None = None,
+    since: str | None = None,
+    until: str | None = None,
 ) -> list[DefautHistorique]:
     """Retourne l'historique des défauts, du plus récent au plus ancien.
 
-    Filtre sur une cellule si ``cellule_id`` est fourni, sinon retourne
-    l'historique de toutes les cellules.
+    Filtre sur une cellule (``cellule_id``), un statut exact (``statut``,
+    parmi DEFAUT_STATUTS) et/ou une plage de dates (bornes incluses) si ces
+    paramètres sont fournis. Sans filtre, retourne l'historique complet de
+    toutes les cellules (comportement inchangé pour les appelants existants).
     """
 
     query = select(DefautHistorique)
     if cellule_id is not None:
         query = query.where(DefautHistorique.cellule_id == cellule_id)
+    if statut is not None:
+        query = query.where(DefautHistorique.statut == statut)
+    if since is not None:
+        query = query.where(DefautHistorique.horodatage >= since)
+    if until is not None:
+        query = query.where(DefautHistorique.horodatage <= until)
     query = query.order_by(DefautHistorique.id.desc())  # pylint: disable=no-member
     return list(session.exec(query))

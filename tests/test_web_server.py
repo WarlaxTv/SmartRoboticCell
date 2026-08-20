@@ -454,6 +454,107 @@ def test_get_faults_history_forbidden_for_operator(client: TestClient) -> None:
     assert resp.status_code == 403
 
 
+def test_get_faults_history_filters_by_status_and_date(client: TestClient) -> None:
+    with Session(db.engine) as session:
+        db.add_defaut(
+            session,
+            cellule_id=9,
+            type_defaut="Défaut filtré par statut",
+            severite="critique",
+            description="...",
+            horodatage="2026-08-19 08:00:00",
+        )
+        resolu_id = db.add_defaut(
+            session,
+            cellule_id=9,
+            type_defaut="Défaut déjà résolu",
+            severite="avertissement",
+            description="...",
+            horodatage="2026-01-01 08:00:00",
+        ).id
+        db.set_defaut_statut(session, resolu_id, db.DEFAUT_STATUT_RESOLU)
+
+    token = _make_token("luc_maint", "MAINTENANCE")
+
+    resp = client.get(
+        "/api/faults/history?cell_id=9&fault_status=actif",
+        headers=_auth_header(token),
+    )
+    assert resp.status_code == 200
+    types = {f["type"] for f in resp.json()["faults"]}
+    assert types == {"Défaut filtré par statut"}
+
+    resp = client.get(
+        "/api/faults/history?cell_id=9&since=2026-08-01%2000:00:00",
+        headers=_auth_header(token),
+    )
+    assert resp.status_code == 200
+    types = {f["type"] for f in resp.json()["faults"]}
+    assert types == {"Défaut filtré par statut"}
+
+
+def test_maintenance_intervention_resolves_defaut_and_appears_in_history(
+    client: TestClient,
+) -> None:
+    """Le workflow bout en bout de la TODO list ("Autre") : la Maintenance
+    choisit un défaut précis, le déclare résolu via l'API, et cela doit se
+    répercuter à la fois sur /api/faults/history (statut) et
+    /api/maintenance/history (nouvelle ligne tracée)."""
+
+    with Session(db.engine) as session:
+        defaut_id = db.add_defaut(
+            session,
+            cellule_id=11,
+            type_defaut="Défaut pour intervention API",
+            severite="critique",
+            description="...",
+        ).id
+
+    token = _make_token("luc_maint", "MAINTENANCE")
+    resp = client.post(
+        f"/api/maintenance/intervention?defaut_id={defaut_id}"
+        "&probleme_resolu=true&notes=Capteur remplacé",
+        headers=_auth_header(token),
+    )
+    assert resp.status_code == 200
+    assert resp.json()["status"] == "ok"
+
+    faults_resp = client.get(
+        "/api/faults/history?cell_id=11", headers=_auth_header(token)
+    )
+    faults = faults_resp.json()["faults"]
+    assert any(f["id"] == defaut_id and f["fault_status"] == "resolu" for f in faults)
+
+    history_resp = client.get(
+        "/api/maintenance/history?cell_id=11", headers=_auth_header(token)
+    )
+    history = history_resp.json()["history"]
+    assert any(
+        item["defaut_id"] == defaut_id and item["probleme_resolu"] is True
+        for item in history
+    )
+
+
+def test_maintenance_intervention_forbidden_for_operator(client: TestClient) -> None:
+    token = _make_token("jean_ope", "OPERATEUR")
+    resp = client.post(
+        "/api/maintenance/intervention?defaut_id=1&probleme_resolu=true",
+        headers=_auth_header(token),
+    )
+    assert resp.status_code == 403
+
+
+def test_maintenance_intervention_unknown_defaut_returns_404(
+    client: TestClient,
+) -> None:
+    token = _make_token("luc_maint", "MAINTENANCE")
+    resp = client.post(
+        "/api/maintenance/intervention?defaut_id=999999&probleme_resolu=true",
+        headers=_auth_header(token),
+    )
+    assert resp.status_code == 404
+
+
 def test_simu_action_force_fault_then_ack_fault_updates_db(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -491,7 +592,7 @@ def test_simu_action_force_fault_then_ack_fault_updates_db(
     with Session(db.engine) as session:
         faults = db.list_defauts(session, cellule_id=42)
     assert len(faults) == 1
-    assert faults[0].resolu is False
+    assert faults[0].statut == db.DEFAUT_STATUT_ACTIF
     assert faults[0].severite == "critique"
 
     resp = client.post(
@@ -502,7 +603,7 @@ def test_simu_action_force_fault_then_ack_fault_updates_db(
 
     with Session(db.engine) as session:
         faults = db.list_defauts(session, cellule_id=42)
-    assert faults[0].resolu is True
+    assert faults[0].statut == db.DEFAUT_STATUT_RESOLU
 
 
 def test_fetch_axis_data_success(monkeypatch: pytest.MonkeyPatch) -> None:

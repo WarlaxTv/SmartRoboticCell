@@ -132,7 +132,7 @@
                 loading: "Chargement...",
                 noFaults: "Aucun défaut enregistré.",
                 noMaint: "Aucune intervention enregistrée.",
-                resolved: "résolu", unresolved: "actif",
+                statusActif: "actif", statusEnCours: "en cours", statusResolu: "résolu",
                 axisSelectorLabel: "Axes affichés sur les courbes :",
                 axisWord: "Axe",
                 axisAll: "Tout", axisNone: "Aucun",
@@ -157,7 +157,7 @@
                 loading: "Loading...",
                 noFaults: "No fault recorded.",
                 noMaint: "No intervention recorded.",
-                resolved: "resolved", unresolved: "active",
+                statusActif: "active", statusEnCours: "in progress", statusResolu: "resolved",
                 axisSelectorLabel: "Axes shown on the charts:",
                 axisWord: "Axis",
                 axisAll: "All", axisNone: "None",
@@ -178,6 +178,12 @@
                 s = s.replaceAll(`{${k}}`, String(v));
             }
             return s;
+        }
+
+        function statusLabel(faultStatus) {
+            if (faultStatus === 'resolu') return t('statusResolu');
+            if (faultStatus === 'en_cours') return t('statusEnCours');
+            return t('statusActif');
         }
 
         let lastKnownCellName = null;
@@ -412,7 +418,7 @@
                     <div class="history-item">
                         <strong>${f.time}</strong> —
                         <span class="sev-${f.severity}">${f.type}</span>
-                        <span class="${f.resolved ? 'resolved-tag' : 'unresolved-tag'}">${f.resolved ? '(' + t('resolved') + ')' : '(' + t('unresolved') + ')'}</span>
+                        <span class="${faultStatusTagClass(f.fault_status)}">(${statusLabel(f.fault_status)})</span>
                         <div style="color:#6E6E73;">${f.description}</div>
                     </div>
                 `).join('');

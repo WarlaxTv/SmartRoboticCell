@@ -273,25 +273,76 @@ async def get_cell_measures(
 @app.get("/api/faults/history")
 async def get_faults_history(
     cell_id: int | None = None,
+    fault_status: str | None = None,
+    since: str | None = None,
+    until: str | None = None,
     current_user: dict = Depends(require_role("MAINTENANCE")),
     session: Session = Depends(get_session),
 ):
-    """Retourne l'historique des défauts, du plus récent au plus ancien."""
-    faults = db.list_defauts(session, cellule_id=cell_id)
+    """Retourne l'historique des défauts, du plus récent au plus ancien.
+
+    ``fault_status`` filtre sur un statut exact ("actif" / "en_cours" /
+    "resolu", cf. db.DEFAUT_STATUTS) : un défaut "actif" représente aussi une
+    demande d'intervention non encore prise en charge (cf. CHG-V2-057).
+    ``since``/``until`` filtrent sur une plage de dates (bornes incluses).
+    Nommé ``fault_status`` (et non ``status``) pour ne pas entrer en
+    collision avec la clé "status" ("ok") de l'enveloppe de réponse.
+    """
+    faults = db.list_defauts(
+        session, cellule_id=cell_id, statut=fault_status, since=since, until=until
+    )
     return {
         "status": "ok",
         "faults": [
             {
+                "id": f.id,
                 "time": f.horodatage,
                 "cell_id": f.cellule_id,
                 "type": f.type_defaut,
                 "severity": f.severite,
                 "description": f.description,
-                "resolved": f.resolu,
+                "fault_status": f.statut,
             }
             for f in faults
         ],
     }
+
+
+@app.post("/api/maintenance/intervention")
+async def record_maintenance_intervention(
+    defaut_id: int,
+    probleme_resolu: bool,
+    notes: str = "",
+    current_user: dict = Depends(require_role("MAINTENANCE")),
+    session: Session = Depends(get_session),
+):
+    """Enregistre une intervention de Maintenance sur un défaut précis.
+
+    Choix explicite de la Maintenance (menu déroulant côté frontend, limité
+    aux défauts actifs/en cours de la cellule concernée) plutôt qu'une
+    résolution implicite du "dernier défaut" : trace qui est intervenu, sur
+    quel défaut exactement, et si le problème est résolu ou toujours actif.
+    Répercute automatiquement le résultat sur le statut du défaut.
+    """
+    try:
+        entry = db.add_maintenance_intervention(
+            session,
+            username_auteur=current_user["username"],
+            defaut_id=defaut_id,
+            notes=notes,
+            probleme_resolu=probleme_resolu,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+    if probleme_resolu:
+        # Le problème est résolu : si l'opérateur avait signalé une demande
+        # d'aide active pour cette cellule, elle n'a plus lieu d'être (même
+        # comportement que les actions "ack_fault"/"ack_maint" du panneau de
+        # simulation).
+        active_maintenance_requests.pop(entry.cellule_id, None)
+
+    return {"status": "ok", "cell_id": entry.cellule_id}
 
 
 @app.post("/api/maintenance/request")
@@ -360,14 +411,16 @@ async def simu_action(
 @app.get("/api/maintenance/history")
 async def get_maintenance_history(
     cell_id: int | None = None,
+    since: str | None = None,
+    until: str | None = None,
     current_user: dict = Depends(require_role("MAINTENANCE")),
     session: Session = Depends(get_session),
 ):
     """Permet à la Maintenance de voir l'historique (persisté en base SQLite).
 
-    Filtre sur ``cell_id`` si fourni (utilisé par la page de détail d'une
-    cellule), sinon retourne l'historique de toutes les cellules (page dédiée
-    /historique-maintenance).
+    Filtre sur ``cell_id``/``since``/``until`` si fournis (utilisé par la
+    page de détail d'une cellule et par les filtres de la page dédiée
+    /historique-maintenance), sinon retourne l'historique complet.
     """
     history = [
         {
@@ -375,8 +428,12 @@ async def get_maintenance_history(
             "action": entry.action,
             "user": entry.username_auteur,
             "cell_id": entry.cellule_id,
+            "defaut_id": entry.defaut_id,
+            "probleme_resolu": entry.probleme_resolu,
         }
-        for entry in db.list_history(session, cellule_id=cell_id)
+        for entry in db.list_history(
+            session, cellule_id=cell_id, since=since, until=until
+        )
     ]
     return {"status": "ok", "history": history}
 
