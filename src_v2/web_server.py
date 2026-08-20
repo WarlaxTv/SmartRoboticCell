@@ -34,7 +34,11 @@ LOGGER = logging.getLogger(__name__)
 
 # Intervalle d'échantillonnage de la tâche de fond (secondes) qui persiste les
 # mesures OPC UA (axes + cellule) en base pour constituer un historique.
-SAMPLING_INTERVAL_SECONDS = 60
+# Réduit de 60 à 15 secondes (demande utilisateur : courbes en direct trop
+# clairsemées). Le simulateur OPC UA lui-même évolue chaque seconde
+# (opcua_server.py), donc cette valeur ne fait que choisir la fréquence à
+# laquelle cet état est *persisté* pour l'historique.
+SAMPLING_INTERVAL_SECONDS = 15
 
 FAULT_TYPE_MANUAL = "Défaut déclenché manuellement (simulation)"
 

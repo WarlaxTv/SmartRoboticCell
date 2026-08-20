@@ -53,7 +53,10 @@ AXIS_TORQUE_RUNNING_EXTRA_NM = [25.0, 18.0, 10.0, 3.0, 1.5, 0.5]
 
 CELLS = [1, 2, 3]
 DAYS_OF_HISTORY = 21
-SAMPLE_INTERVAL_MINUTES = 15
+# Réduit de 15 à 5 minutes (demande utilisateur : courbes historiques trop
+# clairsemées). ~127k relevés d'axes sur 21 jours / 3 cellules, ce qui reste
+# largement raisonnable pour SQLite et pour le temps d'exécution du script.
+SAMPLE_INTERVAL_MINUTES = 5
 
 # Marqueur distinctif des lignes créées par ce script, pour pouvoir les
 # reconnaître plus tard (et elles seules) sans jamais toucher une vraie
@@ -72,14 +75,46 @@ FAULT_TYPES = [
 ]
 
 
-def _is_running(moment: datetime) -> bool:
-    """Modèle simple de cycle de production : actif en semaine, 6h-21h, ~80%."""
+# Probabilité de bascule d'état (production <-> arrêt) à chaque pas
+# d'échantillonnage. Avec SAMPLE_INTERVAL_MINUTES minutes par pas, une
+# bascule moyenne toutes les BLOCK_TICKS pas donne des blocs continus d'une
+# durée réaliste (~1h) plutôt qu'un état qui change à chaque point.
+BLOCK_TICKS = 12
+SWITCH_PROBABILITY = 1.0 / BLOCK_TICKS
+
+
+def _running_share(moment: datetime) -> float:
+    """Probabilité cible de production à cet instant (tendance de fond)."""
 
     if moment.weekday() >= 5:  # week-end : production très réduite
-        return random.random() < 0.10
+        return 0.10
     if 6 <= moment.hour < 21:
-        return random.random() < 0.80
-    return random.random() < 0.05
+        return 0.80
+    return 0.05
+
+
+def _next_running_state(target_share: float, currently_running: bool | None) -> bool:
+    """Fait évoluer l'état production/arrêt par blocs persistants.
+
+    Ancien modèle (bug remonté par l'utilisateur, voir
+    JOURNAL_ERREURS_ET_FIXES_FR.md → INC-V2-020) : chaque point tirait un
+    nouvel état production/arrêt de façon totalement indépendante du point
+    précédent. Combiné à l'interpolation progressive des axes (qui ne
+    convergeait donc jamais complètement vers sa cible avant qu'elle ne
+    change à nouveau), cela produisait des allers-retours erratiques
+    ("retours en arrière") sur les courbes température/courant/couple,
+    visibles y compris hors de toute anomalie réelle.
+
+    Ce modèle ne réévalue l'état qu'avec une faible probabilité à chaque
+    pas (``SWITCH_PROBABILITY``), ce qui donne des blocs continus de
+    plusieurs dizaines de minutes à quelques heures — comme une vraie
+    ligne de production qui tourne en continu puis s'arrête, plutôt que de
+    changer d'état à chaque relevé.
+    """
+
+    if currently_running is None or random.random() < SWITCH_PROBABILITY:
+        return random.random() < target_share
+    return currently_running
 
 
 def _seed_measures() -> tuple[int, int]:
@@ -101,15 +136,20 @@ def _seed_measures() -> tuple[int, int]:
         for cell_id in CELLS
     }
     lubrix_state = {cell_id: 96.0 for cell_id in CELLS}
+    # État production/arrêt persistant par cellule (voir _next_running_state) :
+    # chaque cellule a sa propre ligne, indépendante des deux autres.
+    running_state: dict[int, bool | None] = dict.fromkeys(CELLS)
 
     with db.Session(db.engine) as session:
         moment = start
         step = timedelta(minutes=SAMPLE_INTERVAL_MINUTES)
         while moment <= now:
             horodatage = moment.strftime("%Y-%m-%d %H:%M:%S")
-            running_now = _is_running(moment)
+            target_share = _running_share(moment)
 
             for cell_id in CELLS:
+                running_now = _next_running_state(target_share, running_state[cell_id])
+                running_state[cell_id] = running_now
                 pressure = 6.2 + random.uniform(-0.15, 0.15)
                 # Usure lente et régulière du lubrifiant sur 3 semaines, avec un
                 # léger bruit ; jamais remonté (pas de "maintenance" simulée ici).

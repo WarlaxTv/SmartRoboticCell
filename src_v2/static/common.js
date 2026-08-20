@@ -76,6 +76,7 @@ function renderTopNav(activePage, role) {
     }
 
     const roleLabel = role ? role : '---';
+    const langLabel = navLang() === 'fr' ? 'EN' : 'FR';
 
     root.innerHTML = `
         <header class="topnav">
@@ -93,10 +94,29 @@ function renderTopNav(activePage, role) {
                         ${links.join('')}
                     </div>
                 </div>
+                <button class="btn btn-nav" onclick="toggleNavLanguage()">${langLabel}</button>
                 <button class="btn btn-nav" onclick="navSignOut()">${navT('navSignOut')}</button>
             </div>
         </header>
     `;
+}
+
+/**
+ * Bascule la langue (FR/EN) et recharge la page.
+ *
+ * Le bandeau de navigation est partagé par toutes les pages (dashboard,
+ * détail cellule, historiques, comparaison de données), mais chacune gère
+ * son propre contenu dynamique (listes rafraîchies par polling, graphiques
+ * Chart.js, etc.). Plutôt que d'exiger de chaque page qu'elle expose un hook
+ * de retraduction cohérent pour tout son contenu déjà affiché, on recharge la
+ * page : chaque page relit déjà systématiquement la langue stockée
+ * (localStorage) à son chargement, donc un rechargement suffit à tout
+ * réafficher dans la langue choisie, sans risque d'oubli ponctuel.
+ */
+function toggleNavLanguage() {
+    const next = navLang() === 'fr' ? 'en' : 'fr';
+    localStorage.setItem('src_lang', next);
+    window.location.reload();
 }
 
 function toggleNavDropdown() {
@@ -173,4 +193,63 @@ function closeModal() {
 
 document.addEventListener('keydown', (evt) => {
     if (evt.key === 'Escape') closeModal();
+});
+
+/* ---------- Agrandissement d'un graphique Chart.js ---------- */
+
+function ensureChartZoomRoot() {
+    let overlay = document.getElementById('chart-zoom-overlay');
+    if (overlay) return overlay;
+
+    overlay = document.createElement('div');
+    overlay.id = 'chart-zoom-overlay';
+    overlay.className = 'chart-zoom-overlay';
+    overlay.innerHTML = `
+        <div class="chart-zoom-box">
+            <div class="chart-zoom-header">
+                <span id="chart-zoom-title"></span>
+                <button class="btn" onclick="closeChartZoom()">&times;</button>
+            </div>
+            <div class="chart-zoom-body"><canvas id="chart-zoom-canvas"></canvas></div>
+        </div>
+    `;
+    document.body.appendChild(overlay);
+    overlay.addEventListener('click', (evt) => {
+        if (evt.target === overlay) closeChartZoom();
+    });
+    return overlay;
+}
+
+let chartZoomInstance = null;
+
+/**
+ * Ouvre une version agrandie d'un graphique Chart.js existant (nouvelle
+ * fenêtre modale plein écran). Chart.js ne permet pas de déplacer une
+ * instance existante vers un autre <canvas> : on reconstruit un nouveau
+ * graphique avec les mêmes jeux de données/options sur un plus grand canvas.
+ */
+function openChartZoom(title, datasets, options) {
+    const overlay = ensureChartZoomRoot();
+    document.getElementById('chart-zoom-title').innerText = title;
+    if (chartZoomInstance) chartZoomInstance.destroy();
+    const ctx = document.getElementById('chart-zoom-canvas');
+    chartZoomInstance = new Chart(ctx, {
+        type: 'line',
+        data: { datasets },
+        options: options || {},
+    });
+    overlay.classList.add('open');
+}
+
+function closeChartZoom() {
+    const overlay = document.getElementById('chart-zoom-overlay');
+    if (overlay) overlay.classList.remove('open');
+    if (chartZoomInstance) {
+        chartZoomInstance.destroy();
+        chartZoomInstance = null;
+    }
+}
+
+document.addEventListener('keydown', (evt) => {
+    if (evt.key === 'Escape') closeChartZoom();
 });

@@ -33,7 +33,6 @@
             <div>
                 <span id="badge-read-only" class="badge">Lecture Seule</span>
                 <span id="badge-ssl" class="badge" style="background:#34C759;">SSL</span>
-                <button id="lang-toggle-app" class="btn" style="background:#5E5CE6; margin-left: 10px;" onclick="toggleLanguage()">FR</button>
             </div>
         </div>
 
@@ -214,17 +213,24 @@
             const langLabel = currentLang === 'fr' ? 'EN' : 'FR';
             const langToggleLogin = document.getElementById('lang-toggle-login');
             if (langToggleLogin) langToggleLogin.innerText = langLabel;
-            const langToggleApp = document.getElementById('lang-toggle-app');
-            if (langToggleApp) langToggleApp.innerText = langLabel;
 
+            // Après connexion, le bandeau de navigation partagé (renderTopNav,
+            // common.js) porte lui-même le bouton FR/EN pour être cohérent sur
+            // toutes les pages du site (il recharge la page au clic, ce qui
+            // réaffiche aussi correctement le panneau de simulation traduit —
+            // celui-ci n'est dessiné qu'une seule fois par souci de ne pas
+            // clignoter, cf. fetchStatus()).
             renderTopNav('main', currentRole);
         }
 
+        // Bascule de langue depuis l'écran de connexion uniquement (avant
+        // authentification, le bandeau de navigation partagé n'existe pas
+        // encore). Une fois connecté, voir toggleNavLanguage() dans
+        // common.js.
         function toggleLanguage() {
             currentLang = currentLang === 'fr' ? 'en' : 'fr';
             localStorage.setItem('src_lang', currentLang);
             applyLanguage();
-            if (token) fetchStatus();
         }
 
         function updateSslBadge() {

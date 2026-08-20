@@ -11,7 +11,7 @@
     <script src="/static/chart.umd.js"></script>
     <style>
         .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(420px, 1fr)); gap: 20px; margin-bottom: 20px; }
-        .card h2 { margin: 0 0 16px 0; font-size: 1em; font-weight: 600; border-bottom: 1px solid var(--border); padding-bottom: 10px; }
+        .card h2 { margin: 0 0 16px 0; font-size: 1em; font-weight: 600; border-bottom: 1px solid var(--border); padding-bottom: 10px; display: flex; align-items: center; justify-content: space-between; }
         canvas { max-height: 260px; }
 
         .axes-table { width: 100%; border-collapse: collapse; font-size: 0.85em; }
@@ -26,35 +26,42 @@
 <body>
     <div id="topnav-root"></div>
 
-    <div class="header">
-        <h1>Détail Cellule #{{ cell_id }}</h1>
-        <div style="display:flex; gap:10px; align-items:center;">
-            <select id="range-select" class="range-select" onchange="loadMeasures()">
-                <option value="24">24 heures</option>
-                <option value="168">7 jours</option>
-                <option value="720">30 jours</option>
-            </select>
-            <a href="/" class="btn">&larr; Retour au dashboard</a>
+    <div id="access-denied" class="access-denied-box hidden">
+        <h2 id="access-denied-title">Accès réservé</h2>
+        <p id="access-denied-body">Cette page est réservée au rôle MAINTENANCE.</p>
+        <a href="/" class="btn" id="access-denied-back">Retour au dashboard</a>
+    </div>
+
+    <main id="page-content" class="hidden">
+        <div class="header">
+            <h1 id="page-title">Cellule {{ cell_id }}</h1>
+            <div style="display:flex; gap:10px; align-items:center;">
+                <select id="range-select" class="range-select" onchange="loadMeasures()">
+                    <option value="24">24 heures</option>
+                    <option value="168">7 jours</option>
+                    <option value="720">30 jours</option>
+                </select>
+                <a href="/" class="btn" id="back-link">&larr; Retour au dashboard</a>
+            </div>
         </div>
-    </div>
 
-    <div id="access-denied" class="access-denied-box" style="display:none;">
-        <p>Cette page est réservée au rôle MAINTENANCE. <a href="/">Retour au dashboard</a>.</p>
-    </div>
-
-    <div id="content">
         <div class="grid">
             <div class="card">
-                <h2>Diagnostics avancés</h2>
+                <h2><span id="title-diag">Diagnostics avancés</span></h2>
                 <div id="advanced-diag" class="diag-line">
-                    <div><span class="diag-label">Température Axes</span> <span id="diag-temp-axes">—</span></div>
+                    <div><span class="diag-label" id="label-temp-axes">Température Axes</span> <span id="diag-temp-axes">—</span></div>
                 </div>
             </div>
             <div class="card">
-                <h2>Axes moteurs — valeurs instantanées</h2>
+                <h2><span id="title-axes-table">Axes moteurs</span></h2>
                 <table class="axes-table" id="axes-table">
                     <thead>
-                        <tr><th>Axe</th><th>Température (°C)</th><th>Courant (A)</th><th>Couple (N·m)</th></tr>
+                        <tr>
+                            <th id="th-axe">Axe</th>
+                            <th id="th-temp">Température (°C)</th>
+                            <th id="th-courant">Courant (A)</th>
+                            <th id="th-couple">Couple (N·m)</th>
+                        </tr>
                     </thead>
                     <tbody id="axes-tbody"></tbody>
                 </table>
@@ -63,46 +70,46 @@
 
         <div class="grid">
             <div class="card">
-                <h2>Historique des défauts — cette cellule</h2>
-                <div id="faults-content"><p class="empty">Chargement...</p></div>
+                <h2><span id="title-faults">Historique des défauts</span></h2>
+                <div id="faults-content"><p class="empty" id="faults-loading">Chargement...</p></div>
             </div>
             <div class="card">
-                <h2>Historique Maintenance — cette cellule</h2>
-                <div id="maint-history-content"><p class="empty">Chargement...</p></div>
+                <h2><span id="title-maint-history">Historique Maintenance</span></h2>
+                <div id="maint-history-content"><p class="empty" id="maint-loading">Chargement...</p></div>
             </div>
         </div>
 
         <div class="filter-bar" id="axis-selector-bar" style="margin-bottom: 20px;">
-            <span style="font-size:0.85em; color:#6E6E73; font-weight:600;">Axes affichés sur les courbes :</span>
-            <label style="font-size:0.85em;"><input type="checkbox" class="axis-checkbox" value="1" checked onchange="onAxisToggle()"> Axe 1</label>
-            <label style="font-size:0.85em;"><input type="checkbox" class="axis-checkbox" value="2" checked onchange="onAxisToggle()"> Axe 2</label>
-            <label style="font-size:0.85em;"><input type="checkbox" class="axis-checkbox" value="3" checked onchange="onAxisToggle()"> Axe 3</label>
-            <label style="font-size:0.85em;"><input type="checkbox" class="axis-checkbox" value="4" checked onchange="onAxisToggle()"> Axe 4</label>
-            <label style="font-size:0.85em;"><input type="checkbox" class="axis-checkbox" value="5" checked onchange="onAxisToggle()"> Axe 5</label>
-            <label style="font-size:0.85em;"><input type="checkbox" class="axis-checkbox" value="6" checked onchange="onAxisToggle()"> Axe 6</label>
-            <button type="button" class="btn" style="padding:4px 10px; font-size:0.8em;" onclick="setAllAxes(true)">Tout</button>
-            <button type="button" class="btn" style="padding:4px 10px; font-size:0.8em;" onclick="setAllAxes(false)">Aucun</button>
+            <span style="font-size:0.85em; color:#6E6E73; font-weight:600;" id="axis-selector-label">Axes affichés sur les courbes :</span>
+            <label style="font-size:0.85em;"><input type="checkbox" class="axis-checkbox" value="1" checked onchange="onAxisToggle()"> <span class="axis-check-label" data-axe="1">Axe 1</span></label>
+            <label style="font-size:0.85em;"><input type="checkbox" class="axis-checkbox" value="2" checked onchange="onAxisToggle()"> <span class="axis-check-label" data-axe="2">Axe 2</span></label>
+            <label style="font-size:0.85em;"><input type="checkbox" class="axis-checkbox" value="3" checked onchange="onAxisToggle()"> <span class="axis-check-label" data-axe="3">Axe 3</span></label>
+            <label style="font-size:0.85em;"><input type="checkbox" class="axis-checkbox" value="4" checked onchange="onAxisToggle()"> <span class="axis-check-label" data-axe="4">Axe 4</span></label>
+            <label style="font-size:0.85em;"><input type="checkbox" class="axis-checkbox" value="5" checked onchange="onAxisToggle()"> <span class="axis-check-label" data-axe="5">Axe 5</span></label>
+            <label style="font-size:0.85em;"><input type="checkbox" class="axis-checkbox" value="6" checked onchange="onAxisToggle()"> <span class="axis-check-label" data-axe="6">Axe 6</span></label>
+            <button type="button" class="btn" style="padding:4px 10px; font-size:0.8em;" onclick="setAllAxes(true)" id="btn-axes-all">Tout</button>
+            <button type="button" class="btn" style="padding:4px 10px; font-size:0.8em;" onclick="setAllAxes(false)" id="btn-axes-none">Aucun</button>
         </div>
 
         <div class="grid">
             <div class="card">
-                <h2>Température par axe (°C)</h2>
+                <h2><span id="title-chart-temp">Température par axe (°C)</span> <button type="button" class="chart-zoom-btn" onclick="zoomChart('temp')" title="Agrandir">⤢</button></h2>
                 <canvas id="chart-temp"></canvas>
             </div>
             <div class="card">
-                <h2>Courant par axe (A)</h2>
+                <h2><span id="title-chart-courant">Courant par axe (A)</span> <button type="button" class="chart-zoom-btn" onclick="zoomChart('courant')" title="Agrandir">⤢</button></h2>
                 <canvas id="chart-courant"></canvas>
             </div>
             <div class="card">
-                <h2>Couple par axe (N·m)</h2>
+                <h2><span id="title-chart-couple">Couple par axe (N·m)</span> <button type="button" class="chart-zoom-btn" onclick="zoomChart('couple')" title="Agrandir">⤢</button></h2>
                 <canvas id="chart-couple"></canvas>
             </div>
             <div class="card">
-                <h2>Pression pneumatique (bar) &amp; Niveau lubrifiant (%)</h2>
+                <h2><span id="title-chart-cell">Pression pneumatique (bar) &amp; Niveau lubrifiant (%)</span> <button type="button" class="chart-zoom-btn" onclick="zoomChart('cell')" title="Agrandir">⤢</button></h2>
                 <canvas id="chart-cell"></canvas>
             </div>
         </div>
-    </div>
+    </main>
 
     <script src="/static/common.js"></script>
     <script>
@@ -111,14 +118,109 @@
         const currentRole = localStorage.getItem('user_role');
         const AXIS_COLORS = ['#0071E3', '#34C759', '#FF9500', '#FF3B30', '#5E5CE6', '#AF52DE'];
 
-        renderTopNav('cell', currentRole);
+        const I18N = {
+            fr: {
+                pageTitleFallback: "Cellule {id}",
+                backLink: "&larr; Retour au dashboard",
+                range24: "24 heures", range168: "7 jours", range720: "30 jours",
+                diagTitle: "Diagnostics avancés",
+                tempAxesLabel: "Température Axes",
+                axesTableTitle: "Axes moteurs",
+                thAxe: "Axe", thTemp: "Température (°C)", thCourant: "Courant (A)", thCouple: "Couple (N·m)",
+                faultsTitle: "Historique des défauts",
+                maintHistoryTitle: "Historique Maintenance",
+                loading: "Chargement...",
+                noFaults: "Aucun défaut enregistré.",
+                noMaint: "Aucune intervention enregistrée.",
+                resolved: "résolu", unresolved: "actif",
+                axisSelectorLabel: "Axes affichés sur les courbes :",
+                axisWord: "Axe",
+                axisAll: "Tout", axisNone: "Aucun",
+                chartTemp: "Température par axe (°C)",
+                chartCourant: "Courant par axe (A)",
+                chartCouple: "Couple par axe (N·m)",
+                chartCell: "Pression pneumatique (bar) & Niveau lubrifiant (%)",
+                pressureLegend: "Pression pneumatique (bar)",
+                lubrixLegend: "Niveau lubrifiant (%)",
+                requestedBy: "par",
+            },
+            en: {
+                pageTitleFallback: "Cell {id}",
+                backLink: "&larr; Back to dashboard",
+                range24: "24 hours", range168: "7 days", range720: "30 days",
+                diagTitle: "Advanced diagnostics",
+                tempAxesLabel: "Axes temperature",
+                axesTableTitle: "Motor axes",
+                thAxe: "Axis", thTemp: "Temperature (°C)", thCourant: "Current (A)", thCouple: "Torque (N·m)",
+                faultsTitle: "Fault history",
+                maintHistoryTitle: "Maintenance history",
+                loading: "Loading...",
+                noFaults: "No fault recorded.",
+                noMaint: "No intervention recorded.",
+                resolved: "resolved", unresolved: "active",
+                axisSelectorLabel: "Axes shown on the charts:",
+                axisWord: "Axis",
+                axisAll: "All", axisNone: "None",
+                chartTemp: "Temperature per axis (°C)",
+                chartCourant: "Current per axis (A)",
+                chartCouple: "Torque per axis (N·m)",
+                chartCell: "Pneumatic pressure (bar) & Lubricant level (%)",
+                pressureLegend: "Pneumatic pressure (bar)",
+                lubrixLegend: "Lubricant level (%)",
+                requestedBy: "by",
+            },
+        };
+
+        function t(key, params = {}) {
+            const lang = navLang();
+            let s = (I18N[lang] && I18N[lang][key]) || I18N.fr[key] || key;
+            for (const [k, v] of Object.entries(params)) {
+                s = s.replaceAll(`{${k}}`, String(v));
+            }
+            return s;
+        }
+
+        let lastKnownCellName = null;
+
+        function applyLanguage() {
+            document.title = `${t('pageTitleFallback', { id: cellId })} - Supervision NF EN 9100`;
+            document.getElementById('page-title').innerText = lastKnownCellName
+                ? `${t('pageTitleFallback', { id: cellId })} — ${lastKnownCellName}`
+                : t('pageTitleFallback', { id: cellId });
+            document.getElementById('back-link').innerHTML = t('backLink');
+            const opts = document.getElementById('range-select').options;
+            opts[0].innerText = t('range24');
+            opts[1].innerText = t('range168');
+            opts[2].innerText = t('range720');
+            document.getElementById('title-diag').innerText = t('diagTitle');
+            document.getElementById('label-temp-axes').innerText = t('tempAxesLabel');
+            document.getElementById('title-axes-table').innerText = t('axesTableTitle');
+            document.getElementById('th-axe').innerText = t('thAxe');
+            document.getElementById('th-temp').innerText = t('thTemp');
+            document.getElementById('th-courant').innerText = t('thCourant');
+            document.getElementById('th-couple').innerText = t('thCouple');
+            document.getElementById('title-faults').innerText = t('faultsTitle');
+            document.getElementById('title-maint-history').innerText = t('maintHistoryTitle');
+            document.getElementById('faults-loading').innerText = t('loading');
+            document.getElementById('maint-loading').innerText = t('loading');
+            document.getElementById('axis-selector-label').innerText = t('axisSelectorLabel');
+            document.querySelectorAll('.axis-check-label').forEach((el) => {
+                el.innerText = `${t('axisWord')} ${el.dataset.axe}`;
+            });
+            document.getElementById('btn-axes-all').innerText = t('axisAll');
+            document.getElementById('btn-axes-none').innerText = t('axisNone');
+            document.getElementById('title-chart-temp').innerText = t('chartTemp');
+            document.getElementById('title-chart-courant').innerText = t('chartCourant');
+            document.getElementById('title-chart-couple').innerText = t('chartCouple');
+            document.getElementById('title-chart-cell').innerText = t('chartCell');
+            document.getElementById('access-denied-title').innerText = navT('accessDeniedTitle');
+            document.getElementById('access-denied-body').innerText = navT('accessDeniedBody');
+            document.getElementById('access-denied-back').innerText = navT('accessDeniedBack');
+            renderTopNav('cell', currentRole);
+        }
 
         if (!token) {
             window.location.href = '/';
-        }
-        if (currentRole !== 'MAINTENANCE') {
-            document.getElementById('content').style.display = 'none';
-            document.getElementById('access-denied').style.display = 'block';
         }
 
         let tempChart, courantChart, coupleChart, cellChart;
@@ -127,6 +229,9 @@
         // isoler un seul axe sur les courbes (utile pour comparer un axe précis
         // sans être gêné par les 5 autres).
         let selectedAxes = new Set([1, 2, 3, 4, 5, 6]);
+        // Dernier jeu de données/label de chaque graphique, pour pouvoir
+        // reconstruire une version agrandie identique (voir zoomChart()).
+        const chartRegistry = {};
 
         function onAxisToggle() {
             selectedAxes = new Set(
@@ -148,7 +253,7 @@
                 byAxis[m.axe].push({ x: m.time, y: m[field] });
             }
             return Object.keys(byAxis).sort((a, b) => a - b).map((axe) => ({
-                label: `Axe ${axe}`,
+                label: `${t('axisWord')} ${axe}`,
                 data: byAxis[axe],
                 borderColor: AXIS_COLORS[(axe - 1) % AXIS_COLORS.length],
                 backgroundColor: 'transparent',
@@ -157,24 +262,36 @@
             }));
         }
 
-        function lineChart(ctx, datasets, yLabel) {
+        function chartOptions(yLabel, extra = {}) {
             // parsing: false exigerait des données déjà au format interne de
             // Chart.js ; avec une échelle "category", cela empêchait les
             // labels de l'axe X d'être construits (axe vide, aucun repère de
             // temps visible). On laisse le parsing par défaut (actif) pour
             // que Chart.js extraie correctement les catégories depuis "x".
-            return new Chart(ctx, {
-                type: 'line',
-                data: { datasets },
-                options: {
-                    scales: {
-                        x: { type: 'category', ticks: { maxTicksLimit: 8, autoSkip: true } },
-                        y: { title: { display: true, text: yLabel } },
-                    },
-                    plugins: { legend: { position: 'bottom' } },
-                    animation: false,
+            return {
+                scales: {
+                    x: { type: 'category', ticks: { maxTicksLimit: 8, autoSkip: true } },
+                    y: { title: { display: true, text: yLabel } },
                 },
-            });
+                plugins: { legend: { position: 'bottom' } },
+                animation: false,
+                ...extra,
+            };
+        }
+
+        function lineChart(ctx, datasets, yLabel) {
+            return new Chart(ctx, { type: 'line', data: { datasets }, options: chartOptions(yLabel) });
+        }
+
+        function zoomChart(key) {
+            const entry = chartRegistry[key];
+            if (!entry) return;
+            const options = chartOptions(entry.yLabel);
+            // Plein écran : plus de place pour les repères temporels, et la
+            // hauteur suit la fenêtre modale plutôt qu'un ratio fixe.
+            options.maintainAspectRatio = false;
+            options.scales.x.ticks.maxTicksLimit = 16;
+            openChartZoom(entry.title, entry.datasets, options);
         }
 
         function renderAxisCharts() {
@@ -189,6 +306,10 @@
             tempChart = lineChart(document.getElementById('chart-temp'), tempSets, '°C');
             courantChart = lineChart(document.getElementById('chart-courant'), courantSets, 'A');
             coupleChart = lineChart(document.getElementById('chart-couple'), coupleSets, 'N·m');
+
+            chartRegistry.temp = { title: t('chartTemp'), datasets: tempSets, yLabel: '°C' };
+            chartRegistry.courant = { title: t('chartCourant'), datasets: courantSets, yLabel: 'A' };
+            chartRegistry.couple = { title: t('chartCouple'), datasets: coupleSets, yLabel: 'N·m' };
         }
 
         async function loadMeasures() {
@@ -206,7 +327,7 @@
 
                 const cellSets = [
                     {
-                        label: 'Pression pneumatique (bar)',
+                        label: t('pressureLegend'),
                         data: data.cell_measures.map((m) => ({ x: m.time, y: m.pneumatic_pressure_bar })),
                         borderColor: '#0071E3',
                         backgroundColor: 'transparent',
@@ -214,7 +335,7 @@
                         pointRadius: 0,
                     },
                     {
-                        label: 'Niveau lubrifiant (%)',
+                        label: t('lubrixLegend'),
                         data: data.cell_measures.map((m) => ({ x: m.time, y: m.lubrix_level_pct })),
                         borderColor: '#FF9500',
                         backgroundColor: 'transparent',
@@ -225,6 +346,7 @@
 
                 if (cellChart) cellChart.destroy();
                 cellChart = lineChart(document.getElementById('chart-cell'), cellSets, '');
+                chartRegistry.cell = { title: t('chartCell'), datasets: cellSets, yLabel: '' };
             } catch (e) { console.error(e); }
         }
 
@@ -239,7 +361,7 @@
                 const tbody = document.getElementById('axes-tbody');
                 tbody.innerHTML = data.axes.map((a) => `
                     <tr>
-                        <td>Axe ${a.axe}</td>
+                        <td>${t('axisWord')} ${a.axe}</td>
                         <td>${Number(a.temperature_c).toFixed(1)}</td>
                         <td>${Number(a.courant_a).toFixed(2)}</td>
                         <td>${Number(a.couple_nm).toFixed(1)}</td>
@@ -248,12 +370,10 @@
             } catch (e) { console.error(e); }
         }
 
-        // La température max des 6 axes vient du flux OPC UA "cellule" (même
-        // champ que la vue principale), pas de l'historique par axe : on
-        // réutilise /api/status et on isole la cellule affichée. Ce bloc
-        // vivait auparavant sur chaque carte du dashboard principal ; il est
-        // désormais réservé à cette page de détail, plus lisible pour ce
-        // niveau d'information. Le niveau de vibrations a été retiré de
+        // La température max des 6 axes et le nom de la cellule viennent du
+        // flux OPC UA "cellule" (même endpoint que la vue principale), pas de
+        // l'historique par axe : on réutilise /api/status et on isole la
+        // cellule affichée. Le niveau de vibrations a été retiré de
         // l'affichage à la demande (donnée jugée peu lisible/peu réaliste).
         async function loadAdvancedDiagnostics() {
             if (currentRole !== 'MAINTENANCE') return;
@@ -267,6 +387,11 @@
                 if (!cell) return;
                 document.getElementById('diag-temp-axes').innerText =
                     `${Number(cell.temp_axes).toFixed(1)} °C (max. 6 axes)`;
+                if (cell.name && cell.name !== lastKnownCellName) {
+                    lastKnownCellName = cell.name;
+                    document.getElementById('page-title').innerText =
+                        `${t('pageTitleFallback', { id: cellId })} — ${lastKnownCellName}`;
+                }
             } catch (e) { console.error(e); }
         }
 
@@ -280,14 +405,14 @@
                 const data = await resp.json();
                 const container = document.getElementById('faults-content');
                 if (data.faults.length === 0) {
-                    container.innerHTML = '<p class="empty">Aucun défaut enregistré.</p>';
+                    container.innerHTML = `<p class="empty">${t('noFaults')}</p>`;
                     return;
                 }
                 container.innerHTML = data.faults.map((f) => `
                     <div class="history-item">
                         <strong>${f.time}</strong> —
                         <span class="sev-${f.severity}">${f.type}</span>
-                        <span class="${f.resolved ? 'resolved-tag' : 'unresolved-tag'}">${f.resolved ? '(résolu)' : '(actif)'}</span>
+                        <span class="${f.resolved ? 'resolved-tag' : 'unresolved-tag'}">${f.resolved ? '(' + t('resolved') + ')' : '(' + t('unresolved') + ')'}</span>
                         <div style="color:#6E6E73;">${f.description}</div>
                     </div>
                 `).join('');
@@ -304,18 +429,23 @@
                 const data = await resp.json();
                 const container = document.getElementById('maint-history-content');
                 if (data.history.length === 0) {
-                    container.innerHTML = '<p class="empty">Aucune intervention enregistrée.</p>';
+                    container.innerHTML = `<p class="empty">${t('noMaint')}</p>`;
                     return;
                 }
                 container.innerHTML = data.history.slice().reverse().map((h) => `
                     <div class="history-item">
-                        <strong>${h.time}</strong> : ${h.action} <em style="color:#6E6E73;">(par ${h.user})</em>
+                        <strong>${h.time}</strong> : ${h.action} <em style="color:#6E6E73;">(${t('requestedBy')} ${h.user})</em>
                     </div>
                 `).join('');
             } catch (e) { console.error(e); }
         }
 
-        if (currentRole === 'MAINTENANCE') {
+        if (currentRole !== 'MAINTENANCE') {
+            applyLanguage();
+            document.getElementById('access-denied').classList.remove('hidden');
+        } else {
+            applyLanguage();
+            document.getElementById('page-content').classList.remove('hidden');
             loadAdvancedDiagnostics();
             loadLiveAxes();
             loadMeasures();
