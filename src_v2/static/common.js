@@ -441,3 +441,70 @@ function downloadChartAsImage(chart, filename) {
     a.click();
     document.body.removeChild(a);
 }
+
+/**
+ * Télécharge l'image PNG d'une courbe dans sa taille/mise en forme AGRANDIE
+ * (mêmes options qu'`openChartZoom`), pas la petite vignette en ligne :
+ * signalé par l'utilisateur ("quand on télécharge l'image il faut que ce
+ * soit l'image de quand on agrandit la courbe"). Construit un graphique
+ * Chart.js temporaire sur un canvas hors écran aux dimensions de la fenêtre
+ * agrandie, télécharge son image, puis le détruit — sans jamais ouvrir la
+ * modale d'agrandissement à l'écran.
+ */
+function downloadZoomedChartImage(datasets, options, labels, filename) {
+    const canvas = document.createElement('canvas');
+    // Mêmes proportions que la fenêtre modale d'agrandissement (cf.
+    // .chart-zoom-box dans theme.css), en résolution native pour un export
+    // net plutôt qu'une capture basse résolution de la vignette d'origine.
+    canvas.width = 1600;
+    canvas.height = 800;
+    const offscreenOptions = { ...options, responsive: false, animation: false };
+    const data = labels ? { labels, datasets } : { datasets };
+    const chart = new Chart(canvas, { type: 'line', data, options: offscreenOptions });
+    downloadChartAsImage(chart, filename);
+    chart.destroy();
+}
+
+/**
+ * Réduit une série temporelle triée (ascendant) à au plus `maxPoints`
+ * points, en moyennant par paquets de points bruts consécutifs plutôt qu'en
+ * en gardant un sur N au hasard — cf. problème signalé par l'utilisateur
+ * ("toujours des problèmes avec des pics sur les données dans les courbes,
+ * des points de courbes pas réguliers, et les traits sont pas lisibles").
+ *
+ * Deux causes distinctes derrière ce symptôme, corrigées ensemble par ce
+ * moyennage : (1) sur une fenêtre de 24h/7j/30j, l'échantillonnage toutes
+ * les 15s produit des milliers de points pour quelques centaines de pixels
+ * de large, ce qui rend les courbes illisibles (traits qui se confondent en
+ * une masse épaisse) ; (2) de rares redémarrages du serveur OPC UA
+ * (`opcua_server.py`) réinitialisent momentanément les 6 axes à leur valeur
+ * "idle" de départ pendant une seule mesure avant de remonter — un pic
+ * vertical isolé et non représentatif. Moyenner sur des paquets de points
+ * bruts dilue mécaniquement ce genre de valeur isolée (elle ne pèse plus que
+ * 1/N dans la moyenne de son paquet) tout en régularisant l'espacement
+ * visuel des points affichés.
+ *
+ * `points` : tableau d'objets triés par temps croissant. `timeField` : nom
+ * du champ horodatage (conservé tel quel, pris au point médian du paquet).
+ * `valueFields` : champs numériques à moyenner. Ne modifie pas `points`.
+ */
+function decimateSeries(points, timeField, valueFields, maxPoints) {
+    if (!points || points.length <= maxPoints) return points || [];
+    const bucketSize = Math.ceil(points.length / maxPoints);
+    const result = [];
+    for (let i = 0; i < points.length; i += bucketSize) {
+        const chunk = points.slice(i, i + bucketSize);
+        const bucket = {};
+        for (const field of valueFields) {
+            const values = chunk
+                .map((p) => p[field])
+                .filter((v) => v !== undefined && v !== null && !Number.isNaN(v));
+            bucket[field] = values.length
+                ? values.reduce((a, b) => a + b, 0) / values.length
+                : null;
+        }
+        bucket[timeField] = chunk[Math.floor(chunk.length / 2)][timeField];
+        result.push(bucket);
+    }
+    return result;
+}

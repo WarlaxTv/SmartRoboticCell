@@ -217,6 +217,12 @@
         // Dernières données chargées, réutilisées par les téléchargements CSV
         // (onglet "Télécharger") sans refaire d'appel réseau.
         let lastLoadedData = null;
+        // Nombre max de points bruts affichés par série avant moyennage (cf.
+        // decimateSeries dans common.js et son explication détaillée dans
+        // cell_detail.html) : évite les courbes illisibles sur une fenêtre
+        // 24h/7j/30j et dilue les pics isolés dus à un redémarrage du
+        // serveur OPC UA.
+        const CHART_MAX_POINTS = 200;
 
         // Fusionne les horodatages de plusieurs séries (une par cellule) en une
         // liste triée et dédupliquée. Les 3 cellules sont échantillonnées l'une
@@ -261,53 +267,71 @@
             });
         }
 
+        // Options de la version agrandie d'une courbe (plein écran modal ET
+        // image téléchargée doivent utiliser exactement les mêmes options,
+        // cf. downloadChart ci-dessous).
+        function buildZoomOptions(entry) {
+            const options = chartOptions(entry.yLabel);
+            options.maintainAspectRatio = false;
+            options.scales.x.ticks.maxTicksLimit = 16;
+            return options;
+        }
+
         function zoomChart(key) {
             const entry = chartRegistry[key];
             if (!entry) return;
-            const options = chartOptions(entry.yLabel);
-            // Plein écran : plus de place pour les repères temporels, et la
-            // hauteur suit la fenêtre modale plutôt qu'un ratio fixe.
-            options.maintainAspectRatio = false;
-            options.scales.x.ticks.maxTicksLimit = 16;
             // labels fournis explicitement (voir openChartZoom dans
             // common.js) pour ne pas réintroduire les sauts en arrière
             // (INC-V2-021) dans la version agrandie.
-            openChartZoom(entry.title, entry.datasets, options, entry.labels);
+            openChartZoom(entry.title, entry.datasets, buildZoomOptions(entry), entry.labels);
         }
 
-        // Téléchargement d'image de courbe (cf. downloadChartAsImage dans
-        // common.js), réservé à la Maintenance (bouton masqué pour
+        // Télécharge l'image de la version AGRANDIE de la courbe (mêmes
+        // options que zoomChart), pas la petite vignette en ligne — signalé
+        // par l'utilisateur ("il faut que ce soit l'image de quand on
+        // agrandit la courbe"). Réservé à la Maintenance (bouton masqué pour
         // l'Opérateur en bas de page, cf. RBAC round 6 : "ni télécharger les
-        // graphs"). `charts` est déjà indexé par id de canvas ("chart-temp",
-        // etc.), qui correspond exactement aux clés utilisées ici.
+        // graphs").
         function downloadChart(key) {
             const entry = chartRegistry[key];
             if (!entry) return;
             const safeTitle = entry.title.replace(/[^a-z0-9]+/gi, '_').toLowerCase();
-            downloadChartAsImage(charts[`chart-${key}`], `comparaison_3_cellules_${safeTitle}.png`);
+            downloadZoomedChartImage(
+                entry.datasets,
+                buildZoomOptions(entry),
+                entry.labels,
+                `comparaison_3_cellules_${safeTitle}.png`
+            );
         }
 
         async function loadAll() {
             const hours = document.getElementById('range-select').value;
             const perCell = await Promise.all(CELLS.map((id) => fetchCellMeasures(id, hours)));
-            const avgPerCell = perCell.map((data) => averageAxesByTime(data.axis_measures));
+            const avgPerCell = perCell
+                .map((data) => averageAxesByTime(data.axis_measures))
+                .map((series) => decimateSeries(
+                    series, 'time', ['temperature_c', 'courant_a', 'couple_nm'], CHART_MAX_POINTS
+                ));
+            const cellMeasuresPerCell = perCell.map((data) => decimateSeries(
+                data.cell_measures, 'time', ['pneumatic_pressure_bar', 'lubrix_level_pct'], CHART_MAX_POINTS
+            ));
 
             const axisLabels = mergedSortedTimes(avgPerCell);
-            const cellMeasureLabels = mergedSortedTimes(perCell.map((data) => data.cell_measures));
+            const cellMeasureLabels = mergedSortedTimes(cellMeasuresPerCell);
 
             const tempSets = [], courantSets = [], coupleSets = [], pressureSets = [], lubrixSets = [];
 
             CELLS.forEach((cellId, i) => {
-                const data = perCell[i];
                 const color = CELL_COLORS[i];
                 const label = `${t('cellLabel')} ${cellId}`;
                 const avg = avgPerCell[i];
+                const cellMeasures = cellMeasuresPerCell[i];
 
                 tempSets.push({ label, data: avg.map(m => ({ x: m.time, y: m.temperature_c })), borderColor: color, backgroundColor: 'transparent', tension: 0.25, pointRadius: 0 });
                 courantSets.push({ label, data: avg.map(m => ({ x: m.time, y: m.courant_a })), borderColor: color, backgroundColor: 'transparent', tension: 0.25, pointRadius: 0 });
                 coupleSets.push({ label, data: avg.map(m => ({ x: m.time, y: m.couple_nm })), borderColor: color, backgroundColor: 'transparent', tension: 0.25, pointRadius: 0 });
-                pressureSets.push({ label, data: data.cell_measures.map(m => ({ x: m.time, y: m.pneumatic_pressure_bar })), borderColor: color, backgroundColor: 'transparent', tension: 0.25, pointRadius: 0 });
-                lubrixSets.push({ label, data: data.cell_measures.map(m => ({ x: m.time, y: m.lubrix_level_pct })), borderColor: color, backgroundColor: 'transparent', tension: 0.25, pointRadius: 0 });
+                pressureSets.push({ label, data: cellMeasures.map(m => ({ x: m.time, y: m.pneumatic_pressure_bar })), borderColor: color, backgroundColor: 'transparent', tension: 0.25, pointRadius: 0 });
+                lubrixSets.push({ label, data: cellMeasures.map(m => ({ x: m.time, y: m.lubrix_level_pct })), borderColor: color, backgroundColor: 'transparent', tension: 0.25, pointRadius: 0 });
             });
 
             lineChart('chart-temp', axisLabels, tempSets, '°C');

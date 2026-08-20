@@ -377,6 +377,13 @@
         // Dernier jeu de données/label de chaque graphique, pour pouvoir
         // reconstruire une version agrandie identique (voir zoomChart()).
         const chartRegistry = {};
+        // Nombre max de points bruts affichés par série avant moyennage
+        // (cf. decimateSeries dans common.js) : au-delà, l'échantillonnage
+        // toutes les 15s produit des milliers de points sur une fenêtre
+        // 24h/7j/30j, illisibles sur un graphique de quelques centaines de
+        // pixels de large (signalé par l'utilisateur : "des pics ... des
+        // points de courbes pas réguliers ... les traits sont pas lisibles").
+        const CHART_MAX_POINTS = 200;
 
         function onAxisToggle() {
             selectedAxes = new Set(
@@ -395,16 +402,19 @@
             for (const m of measures) {
                 if (!selectedAxes.has(m.axe)) continue;
                 if (!byAxis[m.axe]) byAxis[m.axe] = [];
-                byAxis[m.axe].push({ x: m.time, y: m[field] });
+                byAxis[m.axe].push(m);
             }
-            return Object.keys(byAxis).sort((a, b) => a - b).map((axe) => ({
-                label: `${t('axisWord')} ${axe}`,
-                data: byAxis[axe],
-                borderColor: AXIS_COLORS[(axe - 1) % AXIS_COLORS.length],
-                backgroundColor: 'transparent',
-                tension: 0.25,
-                pointRadius: 0,
-            }));
+            return Object.keys(byAxis).sort((a, b) => a - b).map((axe) => {
+                const decimated = decimateSeries(byAxis[axe], 'time', [field], CHART_MAX_POINTS);
+                return {
+                    label: `${t('axisWord')} ${axe}`,
+                    data: decimated.map((m) => ({ x: m.time, y: m[field] })),
+                    borderColor: AXIS_COLORS[(axe - 1) % AXIS_COLORS.length],
+                    backgroundColor: 'transparent',
+                    tension: 0.25,
+                    pointRadius: 0,
+                };
+            });
         }
 
         function chartOptions(yLabel, extra = {}) {
@@ -428,34 +438,37 @@
             return new Chart(ctx, { type: 'line', data: { datasets }, options: chartOptions(yLabel) });
         }
 
+        // Options de la version agrandie d'une courbe (plein écran modal ET
+        // image téléchargée doivent utiliser exactement les mêmes options,
+        // cf. downloadChart ci-dessous).
+        function buildZoomOptions(entry) {
+            const options = chartOptions(entry.yLabel);
+            options.maintainAspectRatio = false;
+            options.scales.x.ticks.maxTicksLimit = 16;
+            return options;
+        }
+
         function zoomChart(key) {
             const entry = chartRegistry[key];
             if (!entry) return;
-            const options = chartOptions(entry.yLabel);
-            // Plein écran : plus de place pour les repères temporels, et la
-            // hauteur suit la fenêtre modale plutôt qu'un ratio fixe.
-            options.maintainAspectRatio = false;
-            options.scales.x.ticks.maxTicksLimit = 16;
-            openChartZoom(entry.title, entry.datasets, options);
+            openChartZoom(entry.title, entry.datasets, buildZoomOptions(entry));
         }
 
-        // Correspondance clé de graphique -> instance Chart.js vivante,
-        // pour le téléchargement d'image (cf. downloadChartAsImage dans
-        // common.js). Réservé à la Maintenance (bouton masqué pour
-        // l'Opérateur, cf. RBAC round 6).
-        function chartInstanceFor(key) {
-            if (key === 'temp') return tempChart;
-            if (key === 'courant') return courantChart;
-            if (key === 'couple') return coupleChart;
-            if (key === 'cell') return cellChart;
-            return null;
-        }
-
+        // Télécharge l'image de la version AGRANDIE de la courbe (mêmes
+        // options que zoomChart), pas la petite vignette en ligne — signalé
+        // par l'utilisateur ("il faut que ce soit l'image de quand on
+        // agrandit la courbe"). Réservé à la Maintenance (bouton masqué
+        // pour l'Opérateur, cf. RBAC round 6).
         function downloadChart(key) {
             const entry = chartRegistry[key];
             if (!entry) return;
             const safeTitle = entry.title.replace(/[^a-z0-9]+/gi, '_').toLowerCase();
-            downloadChartAsImage(chartInstanceFor(key), `cellule_${cellId}_${safeTitle}.png`);
+            downloadZoomedChartImage(
+                entry.datasets,
+                buildZoomOptions(entry),
+                undefined,
+                `cellule_${cellId}_${safeTitle}.png`
+            );
         }
 
         function renderAxisCharts() {
@@ -489,10 +502,16 @@
                 lastAxisMeasures = data.axis_measures;
                 renderAxisCharts();
 
+                const decimatedCellMeasures = decimateSeries(
+                    data.cell_measures,
+                    'time',
+                    ['pneumatic_pressure_bar', 'lubrix_level_pct'],
+                    CHART_MAX_POINTS
+                );
                 const cellSets = [
                     {
                         label: t('pressureLegend'),
-                        data: data.cell_measures.map((m) => ({ x: m.time, y: m.pneumatic_pressure_bar })),
+                        data: decimatedCellMeasures.map((m) => ({ x: m.time, y: m.pneumatic_pressure_bar })),
                         borderColor: '#0071E3',
                         backgroundColor: 'transparent',
                         tension: 0.25,
@@ -500,7 +519,7 @@
                     },
                     {
                         label: t('lubrixLegend'),
-                        data: data.cell_measures.map((m) => ({ x: m.time, y: m.lubrix_level_pct })),
+                        data: decimatedCellMeasures.map((m) => ({ x: m.time, y: m.lubrix_level_pct })),
                         borderColor: '#FF9500',
                         backgroundColor: 'transparent',
                         tension: 0.25,

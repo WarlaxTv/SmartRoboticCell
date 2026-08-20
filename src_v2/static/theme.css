@@ -169,6 +169,18 @@ body {
 .card.fault { background-color: var(--fault-bg); }
 .card.maint { background-color: var(--warn-bg); }
 
+/* Cartes du dashboard principal uniquement (pas cell_detail.html ni
+   data_comparison.html, qui utilisent .card pour des graphiques dont le
+   redimensionnement flex peut être fragile) : la grille étire déjà chaque
+   carte à la hauteur de la plus grande de sa ligne (comportement par défaut
+   de CSS Grid), mais un badge d'alerte qui fait passer l'en-tête sur 2
+   lignes décale tout le contenu qui suit — dont le bouton d'action en bas
+   de carte, qui n'était alors plus aligné avec celui des cartes voisines.
+   flex-column + margin-top:auto sur le bloc d'actions ancre ce bouton en
+   bas de la carte quelle que soit la hauteur du contenu au-dessus. */
+.dashboard .card { display: flex; flex-direction: column; }
+.dashboard .card .card-actions { margin-top: auto; padding-top: 15px; }
+
 .card h2 { margin-top: 0; color: var(--ink); display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid var(--border); padding-bottom: 12px; margin-bottom: 16px; font-size: 1.05em; font-weight: 600; }
 .stat { margin: 10px 0; font-size: 0.95em; display: flex; justify-content: space-between; align-items: center;}
 .stat-label { font-weight: 600; color: var(--muted); }
