@@ -21,6 +21,8 @@ from src_v2.opcua_client import (
     apply_simulated_action,
     fetch_axis_data,
     fetch_opcua_data,
+    is_maintenance_due,
+    report_manual_fault,
 )
 from src_v2.security import (
     ACCESS_TOKEN_EXPIRE_MINUTES,
@@ -359,6 +361,38 @@ async def record_maintenance_intervention(
         # simulation).
         active_maintenance_requests.pop(entry.cellule_id, None)
 
+        # Si le défaut résolu est une anomalie critique signalée par la
+        # Maintenance elle-même (cf. /api/maintenance/report-issue), elle
+        # avait mis la cellule à l'arrêt côté OPC UA (CHG-V2-070) : on lève
+        # cet état seulement si aucune AUTRE anomalie critique signalée par
+        # la Maintenance n'est encore active sur cette même cellule, pour ne
+        # pas rouvrir à tort une cellule qui a encore un problème en cours.
+        resolved_defaut = db.get_defaut(session, defaut_id)
+        if (
+            resolved_defaut is not None
+            and resolved_defaut.type_defaut == MAINTENANCE_REPORTED_ISSUE_TYPE
+            and resolved_defaut.severite == db.DEFAUT_SEVERITE_CRITIQUE
+        ):
+            other_active_critical = [
+                f
+                for f in db.list_defauts(session, cellule_id=resolved_defaut.cellule_id)
+                if f.id != resolved_defaut.id
+                and f.type_defaut == MAINTENANCE_REPORTED_ISSUE_TYPE
+                and f.severite == db.DEFAUT_SEVERITE_CRITIQUE
+                and f.statut != db.DEFAUT_STATUT_RESOLU
+            ]
+            if not other_active_critical:
+                try:
+                    await apply_simulated_action(
+                        resolved_defaut.cellule_id, "ack_fault"
+                    )
+                except Exception:
+                    LOGGER.exception(
+                        "Impossible de lever l'état de défaut OPC UA après "
+                        "résolution du défaut #%s",
+                        resolved_defaut.id,
+                    )
+
     return {"status": "ok", "cell_id": entry.cellule_id}
 
 
@@ -466,6 +500,21 @@ async def report_issue(
         severite=severity,
         description=description.strip(),
     )
+
+    if severity == db.DEFAUT_SEVERITE_CRITIQUE:
+        # Une anomalie critique signalée par la Maintenance doit mettre la
+        # cellule à l'arrêt comme un défaut réel (cf. décision utilisateur
+        # CHG-V2-070). Résilient à une indisponibilité ponctuelle de l'OPC
+        # UA : le défaut est déjà persisté en base, source de vérité pour
+        # l'historique/l'audit, même si l'état OT n'a pas pu être répercuté.
+        try:
+            await report_manual_fault(cell_id, description.strip())
+        except Exception:
+            LOGGER.exception(
+                "Impossible de répercuter l'anomalie critique #%s sur l'état OPC UA",
+                defaut.id,
+            )
+
     return {"status": "ok", "id": defaut.id}
 
 
@@ -483,6 +532,19 @@ async def simu_action(
     les effets applicatifs (état des demandes actives, historique persisté).
     """
     try:
+        if action == "ack_maint" and not await is_maintenance_due(cell_id):
+            # CHG-V2-070 : "Faire la maintenance" / "Maintenance effectuée"
+            # ne doit fonctionner que quand le compteur a réellement atteint
+            # 0 — avant, ce bouton "réalisait" la maintenance à tout moment,
+            # y compris pour masquer à tort un arrêt en cours.
+            raise HTTPException(
+                status_code=409,
+                detail=(
+                    "La maintenance n'est pas encore requise sur cette "
+                    "cellule (le compteur n'a pas atteint 0)."
+                ),
+            )
+
         await apply_simulated_action(cell_id, action)
 
         if action == "force_fault":
@@ -508,6 +570,10 @@ async def simu_action(
             )
 
         return {"status": "ok"}
+    except HTTPException:
+        # Ne pas re-envelopper une HTTPException volontaire (ex. 409 ci-dessus
+        # si la maintenance n'est pas encore due) dans un 500 générique.
+        raise
     except Exception as exc:
         LOGGER.exception("Simulation action failed")
         raise HTTPException(status_code=500, detail=str(exc)) from exc

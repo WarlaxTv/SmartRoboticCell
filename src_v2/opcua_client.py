@@ -153,6 +153,79 @@ async def fetch_axis_data(cell_id: int) -> list[dict[str, Any]]:
         return []
 
 
+async def _write_fault_state(cell_node: Any, idx: int, alarm_text: str) -> None:
+    """Écrit l'état "en défaut" sur les noeuds OPC UA d'une cellule.
+
+    Factorisé entre l'action de simulation ``force_fault`` et
+    ``report_manual_fault`` (signalement Maintenance critique, cf.
+    CHG-V2-070) : les deux doivent mettre la cellule strictement dans le même
+    état visible (dashboard rouge, cycle à l'arrêt) — seul le texte de
+    l'alarme diffère (générique pour la simulation, description réelle du
+    problème pour un signalement Maintenance).
+    """
+
+    await (await cell_node.get_child(f"{idx}:EnDefaut")).write_value(
+        ua.DataValue(ua.Variant(True, ua.VariantType.Boolean))
+    )
+    await (await cell_node.get_child(f"{idx}:Etat")).write_value(
+        ua.DataValue(ua.Variant("DEFAUT", ua.VariantType.String))
+    )
+    await (await cell_node.get_child(f"{idx}:AlarmesActives")).write_value(
+        ua.DataValue(ua.Variant(alarm_text, ua.VariantType.String))
+    )
+    await (await cell_node.get_child(f"{idx}:ProgressionCycle")).write_value(
+        ua.DataValue(ua.Variant(0.0, ua.VariantType.Double))
+    )
+
+
+async def report_manual_fault(cell_id: int, alarm_text: str) -> None:
+    """Met une cellule en état "défaut" suite à un signalement Maintenance critique.
+
+    Réutilise exactement le même état OT qu'un défaut classique (EnDefaut,
+    Etat, AlarmesActives, ProgressionCycle à 0) afin que le dashboard traite
+    un incident critique signalé manuellement comme un arrêt machine réel,
+    et non comme une simple ligne dans l'historique (cf. décision
+    utilisateur CHG-V2-070 : "si la maintenance met une alerte critique la
+    machine doit être en arrêt comme si il y avait un défaut").
+    """
+
+    async with Client(url=OPCUA_URL) as client:
+        idx = await client.get_namespace_index(NAMESPACE_URI)
+        cell_node = await client.nodes.objects.get_child(
+            [f"{idx}:SupervisionUsine", f"{idx}:CelluleRobotique_{cell_id}"]
+        )
+        await _write_fault_state(cell_node, idx, alarm_text)
+
+
+async def is_maintenance_due(cell_id: int) -> bool:
+    """Indique si le compteur "temps avant maintenance" d'une cellule a
+    effectivement atteint 0 (noeud OPC UA MaintenanceRequise).
+
+    Utilisé pour empêcher l'action de simulation "ack_maint" ("Faire la
+    maintenance" / "Maintenance effectuée") de fonctionner tant que la
+    maintenance n'est pas réellement due (cf. décision utilisateur
+    CHG-V2-070 : ce bouton "réalisait" la maintenance à tout moment, même
+    sans nécessité, ce qui permettait aussi de masquer à tort un arrêt en
+    cours). Retourne False (comportement prudent) si l'état est illisible
+    plutôt que de propager l'exception, comme fetch_opcua_data()/
+    fetch_axis_data().
+    """
+
+    try:
+        async with Client(url=OPCUA_URL) as client:
+            idx = await client.get_namespace_index(NAMESPACE_URI)
+            cell_node = await client.nodes.objects.get_child(
+                [f"{idx}:SupervisionUsine", f"{idx}:CelluleRobotique_{cell_id}"]
+            )
+            return bool(await _read_node_value(cell_node, idx, "MaintenanceRequise"))
+    except Exception:
+        LOGGER.exception(
+            "OPC UA read failure while checking maintenance due state for cell %s",
+            cell_id,
+        )
+        return False
+
+
 async def apply_simulated_action(cell_id: int, action: str) -> None:
     """Applique une action de simulation en écrivant les noeuds OPC UA associés.
 
@@ -170,20 +243,7 @@ async def apply_simulated_action(cell_id: int, action: str) -> None:
         )
 
         if action == "force_fault":
-            await (await cell_node.get_child(f"{idx}:EnDefaut")).write_value(
-                ua.DataValue(ua.Variant(True, ua.VariantType.Boolean))
-            )
-            await (await cell_node.get_child(f"{idx}:Etat")).write_value(
-                ua.DataValue(ua.Variant("DEFAUT", ua.VariantType.String))
-            )
-            await (await cell_node.get_child(f"{idx}:AlarmesActives")).write_value(
-                ua.DataValue(
-                    ua.Variant("ERR-MANUELLE-SIMULATION", ua.VariantType.String)
-                )
-            )
-            await (await cell_node.get_child(f"{idx}:ProgressionCycle")).write_value(
-                ua.DataValue(ua.Variant(0.0, ua.VariantType.Double))
-            )
+            await _write_fault_state(cell_node, idx, "ERR-MANUELLE-SIMULATION")
 
         elif action == "force_maint":
             # On met le compteur à 9 heures pour déclencher l'alerte

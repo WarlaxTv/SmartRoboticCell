@@ -18,9 +18,6 @@
         .axes-table th, .axes-table td { text-align: left; padding: 8px 6px; border-bottom: 1px solid var(--border); }
         .axes-table th { color: var(--muted); font-weight: 600; }
         .empty { color: var(--muted); font-size: 0.9em; }
-
-        .diag-line { font-family: monospace; font-size: 0.9em; color: var(--warn); }
-        .diag-line .diag-label { display: inline-block; width: 170px; color: var(--muted); font-weight: 600; }
     </style>
 </head>
 <body>
@@ -47,11 +44,8 @@
 
         <div class="grid">
             <div class="card">
-                <h2><span id="title-diag">Diagnostics avancés</span></h2>
-                <div id="advanced-diag" class="diag-line">
-                    <div><span class="diag-label" id="label-temp-axes">Température Axes</span> <span id="diag-temp-axes">—</span></div>
-                </div>
-                <div id="active-issues-block" style="margin-top:14px;">
+                <h2><span id="title-diag">Informations générales</span></h2>
+                <div id="active-issues-block">
                     <p class="empty" id="active-issues-loading">Chargement...</p>
                 </div>
                 <button type="button" class="btn btn-maint" id="report-issue-btn" style="margin-top:14px;" onclick="openReportIssueModal()">Signaler un problème</button>
@@ -148,6 +142,41 @@
         </div>
     </div>
 
+    <!-- Popup "Intervenir sur un défaut" (rôle MAINTENANCE) : résoudre un par
+         un les problèmes actifs listés ci-dessus, avec message optionnel.
+         Réutilise exactement le même flux que la page Historique des défauts
+         (/api/maintenance/intervention), cf. CHG-V2-070. -->
+    <div id="intervention-modal-overlay" class="modal-overlay">
+        <div class="modal-box">
+            <div class="modal-header">
+                <span id="intervention-modal-title">Enregistrer une intervention</span>
+            </div>
+            <div class="modal-body">
+                <div class="form-field">
+                    <label id="intervention-outcome-label">Résultat</label>
+                    <div class="radio-choice">
+                        <label id="intervention-radio-resolved-label">
+                            <input type="radio" name="intervention-outcome" value="resolved" checked onchange="updateInterventionRadioStyle()">
+                            <span id="intervention-radio-resolved-text">Problème résolu</span>
+                        </label>
+                        <label id="intervention-radio-ongoing-label">
+                            <input type="radio" name="intervention-outcome" value="ongoing" onchange="updateInterventionRadioStyle()">
+                            <span id="intervention-radio-ongoing-text">Pris en charge, reste actif</span>
+                        </label>
+                    </div>
+                </div>
+                <div class="form-field">
+                    <label for="intervention-notes" id="intervention-notes-label">Notes (optionnel)</label>
+                    <textarea id="intervention-notes" rows="3"></textarea>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn secondary" id="intervention-cancel-btn" onclick="closeInterventionModal()">Annuler</button>
+                <button class="btn" id="intervention-submit-btn" onclick="submitIntervention()">Valider</button>
+            </div>
+        </div>
+    </div>
+
     <script src="/static/common.js"></script>
     <script>
         const cellId = {{ cell_id }};
@@ -160,8 +189,7 @@
                 pageTitleFallback: "Cellule {id}",
                 backLink: "&larr; Retour au dashboard",
                 range24: "24 heures", range168: "7 jours", range720: "30 jours",
-                diagTitle: "Diagnostics avancés",
-                tempAxesLabel: "Température Axes",
+                diagTitle: "Informations générales",
                 axesTableTitle: "Axes moteurs",
                 thAxe: "Axe", thTemp: "Température (°C)", thCourant: "Courant (A)", thCouple: "Couple (N·m)",
                 faultsTitle: "Historique des défauts",
@@ -192,13 +220,22 @@
                 reportIssueSubmit: "Valider",
                 reportIssueSuccess: "Problème signalé.",
                 reportIssueError: "Impossible de signaler le problème (description requise).",
+                intervene: "Intervenir",
+                interventionModalTitle: "Enregistrer une intervention",
+                interventionOutcomeLabel: "Résultat",
+                interventionResolved: "Problème résolu",
+                interventionOngoing: "Pris en charge, reste actif",
+                interventionNotesLabel: "Notes (optionnel)",
+                interventionCancel: "Annuler",
+                interventionSubmit: "Valider",
+                interventionSuccess: "Intervention enregistrée.",
+                interventionError: "Impossible d'enregistrer l'intervention.",
             },
             en: {
                 pageTitleFallback: "Cell {id}",
                 backLink: "&larr; Back to dashboard",
                 range24: "24 hours", range168: "7 days", range720: "30 days",
-                diagTitle: "Advanced diagnostics",
-                tempAxesLabel: "Axes temperature",
+                diagTitle: "General information",
                 axesTableTitle: "Motor axes",
                 thAxe: "Axis", thTemp: "Temperature (°C)", thCourant: "Current (A)", thCouple: "Torque (N·m)",
                 faultsTitle: "Fault history",
@@ -229,6 +266,16 @@
                 reportIssueSubmit: "Submit",
                 reportIssueSuccess: "Issue reported.",
                 reportIssueError: "Could not report the issue (description required).",
+                intervene: "Intervene",
+                interventionModalTitle: "Record an intervention",
+                interventionOutcomeLabel: "Outcome",
+                interventionResolved: "Problem resolved",
+                interventionOngoing: "Taken care of, still active",
+                interventionNotesLabel: "Notes (optional)",
+                interventionCancel: "Cancel",
+                interventionSubmit: "Submit",
+                interventionSuccess: "Intervention recorded.",
+                interventionError: "Could not record the intervention.",
             },
         };
 
@@ -260,7 +307,6 @@
             opts[1].innerText = t('range168');
             opts[2].innerText = t('range720');
             document.getElementById('title-diag').innerText = t('diagTitle');
-            document.getElementById('label-temp-axes').innerText = t('tempAxesLabel');
             document.getElementById('title-axes-table').innerText = t('axesTableTitle');
             document.getElementById('th-axe').innerText = t('thAxe');
             document.getElementById('th-temp').innerText = t('thTemp');
@@ -290,6 +336,13 @@
             document.getElementById('report-issue-description-label').innerText = t('reportIssueDescriptionLabel');
             document.getElementById('report-issue-cancel-btn').innerText = t('reportIssueCancel');
             document.getElementById('report-issue-submit-btn').innerText = t('reportIssueSubmit');
+            document.getElementById('intervention-modal-title').innerText = t('interventionModalTitle');
+            document.getElementById('intervention-outcome-label').innerText = t('interventionOutcomeLabel');
+            document.getElementById('intervention-radio-resolved-text').innerText = t('interventionResolved');
+            document.getElementById('intervention-radio-ongoing-text').innerText = t('interventionOngoing');
+            document.getElementById('intervention-notes-label').innerText = t('interventionNotesLabel');
+            document.getElementById('intervention-cancel-btn').innerText = t('interventionCancel');
+            document.getElementById('intervention-submit-btn').innerText = t('interventionSubmit');
             document.getElementById('access-denied-title').innerText = navT('accessDeniedTitle');
             document.getElementById('access-denied-body').innerText = navT('accessDeniedBody');
             document.getElementById('access-denied-back').innerText = navT('accessDeniedBack');
@@ -447,11 +500,13 @@
             } catch (e) { console.error(e); }
         }
 
-        // La température max des 6 axes et le nom de la cellule viennent du
-        // flux OPC UA "cellule" (même endpoint que la vue principale), pas de
-        // l'historique par axe : on réutilise /api/status et on isole la
-        // cellule affichée. Le niveau de vibrations a été retiré de
-        // l'affichage à la demande (donnée jugée peu lisible/peu réaliste).
+        // Le nom de la cellule vient du flux OPC UA "cellule" (même endpoint
+        // que la vue principale) : on réutilise /api/status et on isole la
+        // cellule affichée, pour garder le titre de page à jour (ex. après
+        // un changement de nom). La température max des axes et le niveau de
+        // vibrations ne sont plus affichés ici (retirés à la demande) : le
+        // panneau "Informations générales" se concentre sur les problèmes
+        // actifs et le signalement d'anomalie.
         async function loadAdvancedDiagnostics() {
             if (currentRole !== 'MAINTENANCE') return;
             try {
@@ -462,8 +517,6 @@
                 const data = await resp.json();
                 const cell = (data.cells || []).find((c) => c.id === cellId);
                 if (!cell) return;
-                document.getElementById('diag-temp-axes').innerText =
-                    `${Number(cell.temp_axes).toFixed(1)} °C (max. 6 axes)`;
                 if (cell.name && cell.name !== lastKnownCellName) {
                     lastKnownCellName = cell.name;
                     document.getElementById('page-title').innerText =
@@ -479,15 +532,69 @@
                 block.innerHTML = `<p class="empty">${t('noActiveIssues')}</p>`;
                 return;
             }
+            // Un bouton "Intervenir" par problème actif (cf. CHG-V2-070) pour
+            // pouvoir les régler un par un avec un message optionnel, sans
+            // devoir passer par la page Historique des défauts — même flux
+            // (/api/maintenance/intervention) que sur cette dernière.
             const items = active.map((f) => `
                 <div class="history-item">
-                    <strong>${f.time}</strong> —
-                    <span class="sev-${f.severity}">${translateFaultText(f.type)}</span>
-                    <span class="${faultStatusTagClass(f.fault_status)}">(${statusLabel(f.fault_status)})</span>
-                    <div style="color:#6E6E73;">${translateFaultText(f.description)}</div>
+                    <div class="history-item-main">
+                        <strong>${f.time}</strong> —
+                        <span class="sev-${f.severity}">${translateFaultText(f.type)}</span>
+                        <span class="${faultStatusTagClass(f.fault_status)}">(${statusLabel(f.fault_status)})</span>
+                        <div style="color:#6E6E73;">${translateFaultText(f.description)}</div>
+                    </div>
+                    <button class="btn btn-intervene" onclick="openInterventionModal(${f.id})">${t('intervene')}</button>
                 </div>
             `).join('');
             block.innerHTML = `<p style="font-weight:600; margin:0 0 6px 0;">${t('activeIssuesTitle')}</p>${items}`;
+        }
+
+        let interventionTargetDefautId = null;
+
+        function openInterventionModal(defautId) {
+            interventionTargetDefautId = defautId;
+            document.getElementById('intervention-notes').value = '';
+            document.querySelector('input[name="intervention-outcome"][value="resolved"]').checked = true;
+            updateInterventionRadioStyle();
+            document.getElementById('intervention-modal-overlay').classList.add('open');
+        }
+
+        function closeInterventionModal() {
+            document.getElementById('intervention-modal-overlay').classList.remove('open');
+            interventionTargetDefautId = null;
+        }
+
+        function updateInterventionRadioStyle() {
+            document.querySelectorAll('#intervention-modal-overlay .radio-choice label').forEach((label) => {
+                const input = label.querySelector('input[type="radio"]');
+                label.classList.toggle('checked', input.checked);
+            });
+        }
+
+        async function submitIntervention() {
+            if (interventionTargetDefautId === null) return;
+            const resolved = document.querySelector('input[name="intervention-outcome"]:checked').value === 'resolved';
+            const notes = document.getElementById('intervention-notes').value;
+            const params = new URLSearchParams({
+                defaut_id: interventionTargetDefautId,
+                probleme_resolu: resolved,
+                notes: notes,
+            });
+            try {
+                const response = await fetch(`/api/maintenance/intervention?${params.toString()}`, {
+                    method: 'POST',
+                    headers: { 'Authorization': `Bearer ${token}` },
+                });
+                if (!response.ok) throw new Error('request failed');
+                closeInterventionModal();
+                showModal(t('interventionSuccess'), 'success');
+                loadFaults();
+                loadMaintenanceHistory();
+            } catch (e) {
+                console.error(e);
+                showModal(t('interventionError'), 'error');
+            }
         }
 
         async function loadFaults() {

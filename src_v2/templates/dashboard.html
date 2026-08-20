@@ -330,6 +330,12 @@
 
                     data.cells.forEach(cell => {
                         const isMaintReq = cell.maint_req || cell.time_to_maint <= 10;
+                        // Distinct de isMaintReq (qui inclut l'alerte précoce à <= 10h,
+                        // pour la bannière/le style) : le bouton "Maintenance effectuée"
+                        // ne doit apparaître QUE quand le compteur a réellement atteint 0
+                        // (cf. décision utilisateur CHG-V2-070). Le serveur applique aussi
+                        // cette règle (409 si tentative prématurée via /api/simu/action).
+                        const maintDue = cell.maint_req === true;
                         const cardClass = cell.fault ? 'fault' : (isMaintReq ? 'maint' : '');
                         const statusClass = cell.fault ? 'status-error' : 'status-ok';
                         
@@ -434,7 +440,7 @@
                             `;
 
                             maintActionHtml = `<div style="margin-top: 15px; display:flex; gap: 10px;">`;
-                            if (isMaintReq) {
+                            if (maintDue) {
                                 maintActionHtml += `<button class="btn" style="background:#5E5CE6; padding: 5px 10px; font-size: 0.8em;" onclick="simuAction(${cell.id}, 'ack_maint')">${t('maintenanceCompleted')}</button>`;
                             }
                             if (cell.fault) {

@@ -203,13 +203,355 @@ def test_simu_action_all_branches(monkeypatch: pytest.MonkeyPatch) -> None:
     client = TestClient(web_server.app)
     token = _make_token("luc_maint", "MAINTENANCE")
 
-    for action in ("force_fault", "force_maint", "ack_fault", "ack_maint"):
+    # "ack_maint" est exclu de cette boucle générique : depuis CHG-V2-070, il
+    # exige que la maintenance soit réellement due (cf. tests dédiés
+    # test_simu_action_ack_maint_*), ce que ce fake client ne simule pas.
+    for action in ("force_fault", "force_maint", "ack_fault"):
         resp = client.post(
             f"/api/simu/action?cell_id=1&action={action}",
             headers=_auth_header(token),
         )
         assert resp.status_code == 200
         assert resp.json()["status"] == "ok"
+
+
+def test_simu_action_ack_maint_rejected_when_not_due(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """CHG-V2-070 : "Faire la maintenance" / "Maintenance effectuée" ne doit
+    pas fonctionner tant que le compteur n'a pas réellement atteint 0."""
+
+    async def _not_due(_cell_id: int) -> bool:
+        return False
+
+    async def _apply(_cell_id: int, _action: str) -> None:
+        raise AssertionError(
+            "apply_simulated_action ne doit pas être appelé quand la "
+            "maintenance n'est pas due"
+        )
+
+    monkeypatch.setattr(web_server, "is_maintenance_due", _not_due)
+    monkeypatch.setattr(web_server, "apply_simulated_action", _apply)
+    client = TestClient(web_server.app)
+    token = _make_token("luc_maint", "MAINTENANCE")
+
+    resp = client.post(
+        "/api/simu/action?cell_id=1&action=ack_maint",
+        headers=_auth_header(token),
+    )
+    assert resp.status_code == 409
+
+
+def test_simu_action_ack_maint_allowed_when_due(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def _due(_cell_id: int) -> bool:
+        return True
+
+    calls: list[tuple[int, str]] = []
+
+    async def _apply(cell_id: int, action: str) -> None:
+        calls.append((cell_id, action))
+
+    monkeypatch.setattr(web_server, "is_maintenance_due", _due)
+    monkeypatch.setattr(web_server, "apply_simulated_action", _apply)
+    client = TestClient(web_server.app)
+    token = _make_token("luc_maint", "MAINTENANCE")
+
+    resp = client.post(
+        "/api/simu/action?cell_id=1&action=ack_maint",
+        headers=_auth_header(token),
+    )
+    assert resp.status_code == 200
+    assert calls == [(1, "ack_maint")]
+
+
+def test_report_issue_critical_triggers_opcua_fault(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """CHG-V2-070 : un signalement critique doit mettre la cellule à l'arrêt
+    côté OPC UA (comme un défaut réel), pas seulement créer une ligne
+    d'historique."""
+
+    calls: list[tuple[int, str]] = []
+
+    async def _fake_report_manual_fault(cell_id: int, alarm_text: str) -> None:
+        calls.append((cell_id, alarm_text))
+
+    monkeypatch.setattr(web_server, "report_manual_fault", _fake_report_manual_fault)
+    token = _make_token("luc_maint", "MAINTENANCE")
+
+    resp = client.post(
+        "/api/maintenance/report-issue"
+        "?cell_id=7&description=Fuite%20critique&severity=critique",
+        headers=_auth_header(token),
+    )
+    assert resp.status_code == 200
+    assert calls == [(7, "Fuite critique")]
+
+
+def test_report_issue_warning_does_not_trigger_opcua_fault(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    calls: list[tuple[int, str]] = []
+
+    async def _fake_report_manual_fault(cell_id: int, alarm_text: str) -> None:
+        calls.append((cell_id, alarm_text))
+
+    monkeypatch.setattr(web_server, "report_manual_fault", _fake_report_manual_fault)
+    token = _make_token("luc_maint", "MAINTENANCE")
+
+    resp = client.post(
+        "/api/maintenance/report-issue"
+        "?cell_id=7&description=Petit%20souci&severity=avertissement",
+        headers=_auth_header(token),
+    )
+    assert resp.status_code == 200
+    assert calls == []
+
+
+def test_report_issue_critical_resilient_to_opcua_failure(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Une panne OPC UA ponctuelle ne doit pas empêcher la persistance du
+    défaut en base (source de vérité pour l'audit)."""
+
+    async def _failing(_cell_id: int, _alarm_text: str) -> None:
+        raise RuntimeError("opcua down")
+
+    monkeypatch.setattr(web_server, "report_manual_fault", _failing)
+    token = _make_token("luc_maint", "MAINTENANCE")
+
+    resp = client.post(
+        "/api/maintenance/report-issue"
+        "?cell_id=7&description=Fuite&severity=critique",
+        headers=_auth_header(token),
+    )
+    assert resp.status_code == 200
+
+
+def test_intervention_resolves_critical_maintenance_issue_clears_opcua_fault(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Résoudre le dernier signalement critique de la Maintenance doit lever
+    l'état de défaut OPC UA qu'il avait déclenché (CHG-V2-070)."""
+
+    calls: list[tuple[int, str]] = []
+
+    async def _fake_apply(cell_id: int, action: str) -> None:
+        calls.append((cell_id, action))
+
+    monkeypatch.setattr(web_server, "apply_simulated_action", _fake_apply)
+
+    with Session(db.engine) as session:
+        defaut_id = db.add_defaut(
+            session,
+            cellule_id=21,
+            type_defaut=web_server.MAINTENANCE_REPORTED_ISSUE_TYPE,
+            severite="critique",
+            description="Fuite hydraulique",
+        ).id
+
+    token = _make_token("luc_maint", "MAINTENANCE")
+    resp = client.post(
+        f"/api/maintenance/intervention?defaut_id={defaut_id}"
+        "&probleme_resolu=true&notes=Réparée",
+        headers=_auth_header(token),
+    )
+    assert resp.status_code == 200
+    assert calls == [(21, "ack_fault")]
+
+
+def test_intervention_does_not_clear_opcua_fault_if_other_critical_issue_remains(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    calls: list[tuple[int, str]] = []
+
+    async def _fake_apply(cell_id: int, action: str) -> None:
+        calls.append((cell_id, action))
+
+    monkeypatch.setattr(web_server, "apply_simulated_action", _fake_apply)
+
+    with Session(db.engine) as session:
+        first_id = db.add_defaut(
+            session,
+            cellule_id=22,
+            type_defaut=web_server.MAINTENANCE_REPORTED_ISSUE_TYPE,
+            severite="critique",
+            description="Problème A",
+        ).id
+        db.add_defaut(
+            session,
+            cellule_id=22,
+            type_defaut=web_server.MAINTENANCE_REPORTED_ISSUE_TYPE,
+            severite="critique",
+            description="Problème B",
+        )
+
+    token = _make_token("luc_maint", "MAINTENANCE")
+    resp = client.post(
+        f"/api/maintenance/intervention?defaut_id={first_id}&probleme_resolu=true",
+        headers=_auth_header(token),
+    )
+    assert resp.status_code == 200
+    assert calls == []
+
+
+def test_intervention_resolving_non_critical_type_does_not_touch_opcua(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    calls: list[tuple[int, str]] = []
+
+    async def _fake_apply(cell_id: int, action: str) -> None:
+        calls.append((cell_id, action))
+
+    monkeypatch.setattr(web_server, "apply_simulated_action", _fake_apply)
+
+    with Session(db.engine) as session:
+        defaut_id = db.add_defaut(
+            session,
+            cellule_id=23,
+            type_defaut="Autre type de défaut",
+            severite="critique",
+            description="Test",
+        ).id
+
+    token = _make_token("luc_maint", "MAINTENANCE")
+    resp = client.post(
+        f"/api/maintenance/intervention?defaut_id={defaut_id}&probleme_resolu=true",
+        headers=_auth_header(token),
+    )
+    assert resp.status_code == 200
+    assert calls == []
+
+
+def test_opcua_report_manual_fault_writes_expected_nodes(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Vérifie au niveau OPC UA que report_manual_fault() écrit bien le même
+    état qu'un défaut classique (EnDefaut/Etat/AlarmesActives/
+    ProgressionCycle), avec le texte d'alarme fourni (CHG-V2-070)."""
+
+    class _VarNode:
+        def __init__(self, name: str, values: dict[str, Any]):
+            self._name = name
+            self._values = values
+
+        async def write_value(self, data_value: Any) -> None:
+            self._values[self._name] = data_value.Value.Value
+
+    class _CellNode:
+        def __init__(self, values: dict[str, Any]):
+            self._values = values
+
+        async def get_child(self, child: str) -> _VarNode:
+            name = child.split(":", 1)[1] if ":" in child else child
+            return _VarNode(name, self._values)
+
+    class _ObjectsNode:
+        def __init__(self, values: dict[str, Any]):
+            self._values = values
+
+        async def get_child(self, _path: list[str]) -> _CellNode:
+            return _CellNode(self._values)
+
+    class _FakeClient:
+        def __init__(self, url: str):
+            self.url = url
+            self.written: dict[str, Any] = {}
+            self.nodes = type("_Nodes", (), {"objects": _ObjectsNode(self.written)})()
+
+        async def __aenter__(self) -> _FakeClient:
+            return self
+
+        async def __aexit__(self, *_exc: Any) -> None:
+            return None
+
+        async def get_namespace_index(self, *_args: Any, **_kwargs: Any) -> int:
+            return 2
+
+    captured: dict[str, Any] = {}
+
+    class _CapturingClient(_FakeClient):
+        def __init__(self, url: str):
+            super().__init__(url)
+            captured["instance"] = self
+
+    monkeypatch.setattr(opcua_client, "Client", _CapturingClient)
+
+    asyncio.run(opcua_client.report_manual_fault(5, "Fuite hydraulique visible"))
+
+    written = captured["instance"].written
+    assert written["EnDefaut"] is True
+    assert written["Etat"] == "DEFAUT"
+    assert written["AlarmesActives"] == "Fuite hydraulique visible"
+    assert written["ProgressionCycle"] == 0.0
+
+
+def test_opcua_is_maintenance_due(monkeypatch: pytest.MonkeyPatch) -> None:
+    class _ReadVar:
+        def __init__(self, value: Any):
+            self._value = value
+
+        async def read_value(self) -> Any:
+            return self._value
+
+    class _CellNode:
+        def __init__(self, value: Any):
+            self._value = value
+
+        async def get_child(self, _child: str) -> _ReadVar:
+            return _ReadVar(self._value)
+
+    class _ObjectsNode:
+        def __init__(self, value: Any):
+            self._value = value
+
+        async def get_child(self, _path: list[str]) -> _CellNode:
+            return _CellNode(self._value)
+
+    def _make_client(value: bool) -> type:
+        class _FakeClient:
+            def __init__(self, url: str):
+                self.url = url
+                self.nodes = type("_Nodes", (), {"objects": _ObjectsNode(value)})()
+
+            async def __aenter__(self) -> _FakeClient:
+                return self
+
+            async def __aexit__(self, *_exc: Any) -> None:
+                return None
+
+            async def get_namespace_index(self, *_args: Any, **_kwargs: Any) -> int:
+                return 2
+
+        return _FakeClient
+
+    monkeypatch.setattr(opcua_client, "Client", _make_client(True))
+    assert asyncio.run(opcua_client.is_maintenance_due(1)) is True
+
+    monkeypatch.setattr(opcua_client, "Client", _make_client(False))
+    assert asyncio.run(opcua_client.is_maintenance_due(1)) is False
+
+
+def test_opcua_is_maintenance_due_defaults_false_on_read_failure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class _FailingClient:
+        def __init__(self, url: str):
+            self.url = url
+
+        async def __aenter__(self) -> _FailingClient:
+            return self
+
+        async def __aexit__(self, *_exc: Any) -> None:
+            return None
+
+        async def get_namespace_index(self, *_args: Any, **_kwargs: Any) -> int:
+            raise RuntimeError("opcua down")
+
+    monkeypatch.setattr(opcua_client, "Client", _FailingClient)
+    assert asyncio.run(opcua_client.is_maintenance_due(1)) is False
 
 
 def test_fetch_opcua_data_success(monkeypatch: pytest.MonkeyPatch) -> None:
