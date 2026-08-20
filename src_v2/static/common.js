@@ -443,6 +443,33 @@ function downloadChartAsImage(chart, filename) {
 }
 
 /**
+ * Fusionne les horodatages de plusieurs séries temporelles (`.time` sur
+ * chaque élément) en une liste triée et dédupliquée, à fournir explicitement
+ * comme "labels" d'un graphique Chart.js à plusieurs jeux de données dont
+ * les horodatages ne coïncident pas exactement d'une série à l'autre.
+ *
+ * Sans cette fusion, l'axe X de type "category" de Chart.js construit sa
+ * propre liste de catégories en concaténant les horodatages dans l'ordre où
+ * il rencontre chaque nouveau jeu de données : un horodatage propre à une
+ * série tardive, absent des séries précédentes, est alors ajouté en FIN de
+ * liste plutôt qu'à sa place chronologique, ce qui fait bondir en arrière le
+ * tracé de cette série (cf. INC-V2-021 sur data_comparison.html — 3
+ * cellules échantillonnées l'une après l'autre dans la même itération de la
+ * boucle de fond, donc décalées de quelques secondes ; et CHG-V2-086 sur
+ * cell_detail.html — 6 axes écrits en base par des INSERT distincts au même
+ * tick, occasionnellement décalés d'1s d'un axe à l'autre, un écart qui
+ * n'apparaissait pas avant l'introduction du moyennage par paquets de
+ * `decimateSeries` ci-dessous).
+ */
+function mergedSortedTimes(timedArrays) {
+    const seen = new Set();
+    for (const arr of timedArrays) {
+        for (const item of arr) seen.add(item.time);
+    }
+    return Array.from(seen).sort();
+}
+
+/**
  * Télécharge l'image PNG d'une courbe dans sa taille/mise en forme AGRANDIE
  * (mêmes options qu'`openChartZoom`), pas la petite vignette en ligne :
  * signalé par l'utilisateur ("quand on télécharge l'image il faut que ce

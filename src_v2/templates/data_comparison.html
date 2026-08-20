@@ -32,7 +32,7 @@
 
     <main id="page-content" class="hidden">
         <div class="header">
-            <h1 id="page-title">Données — comparaison des 3 cellules</h1>
+            <h1 id="page-title">Données par cellule</h1>
         </div>
 
         <div class="tab-bar">
@@ -50,28 +50,12 @@
                 </select>
             </div>
 
-            <div class="grid2">
-                <div class="card">
-                    <h2><span id="title-temp">Température moyenne des axes (°C)</span> <span><button type="button" class="chart-zoom-btn chart-dl-btn" id="dl-btn-temp" onclick="downloadChart('temp')" title="Télécharger l'image">&#8681;</button><button type="button" class="chart-zoom-btn" onclick="zoomChart('temp')" title="Agrandir">⤢</button></span></h2>
-                    <canvas id="chart-temp"></canvas>
-                </div>
-                <div class="card">
-                    <h2><span id="title-courant">Courant moyen des axes (A)</span> <span><button type="button" class="chart-zoom-btn chart-dl-btn" id="dl-btn-courant" onclick="downloadChart('courant')" title="Télécharger l'image">&#8681;</button><button type="button" class="chart-zoom-btn" onclick="zoomChart('courant')" title="Agrandir">⤢</button></span></h2>
-                    <canvas id="chart-courant"></canvas>
-                </div>
-                <div class="card">
-                    <h2><span id="title-couple">Couple moyen des axes (N·m)</span> <span><button type="button" class="chart-zoom-btn chart-dl-btn" id="dl-btn-couple" onclick="downloadChart('couple')" title="Télécharger l'image">&#8681;</button><button type="button" class="chart-zoom-btn" onclick="zoomChart('couple')" title="Agrandir">⤢</button></span></h2>
-                    <canvas id="chart-couple"></canvas>
-                </div>
-                <div class="card">
-                    <h2><span id="title-pressure">Pression pneumatique (bar)</span> <span><button type="button" class="chart-zoom-btn chart-dl-btn" id="dl-btn-pressure" onclick="downloadChart('pressure')" title="Télécharger l'image">&#8681;</button><button type="button" class="chart-zoom-btn" onclick="zoomChart('pressure')" title="Agrandir">⤢</button></span></h2>
-                    <canvas id="chart-pressure"></canvas>
-                </div>
-                <div class="card">
-                    <h2><span id="title-lubrix">Niveau lubrifiant (%)</span> <span><button type="button" class="chart-zoom-btn chart-dl-btn" id="dl-btn-lubrix" onclick="downloadChart('lubrix')" title="Télécharger l'image">&#8681;</button><button type="button" class="chart-zoom-btn" onclick="zoomChart('lubrix')" title="Agrandir">⤢</button></span></h2>
-                    <canvas id="chart-lubrix"></canvas>
-                </div>
-            </div>
+            <!-- Une section par cellule (cf. demande utilisateur : "je ne veux
+                 pas d'un graphique avec les 3 cellules. Je veux les cellules
+                 indépendantes"), construite dynamiquement par loadAll() ->
+                 cellSectionHtml(), sur le même principe que les cartes du
+                 dashboard principal. -->
+            <div id="per-cell-charts"></div>
         </div>
 
         <div id="tab-download" class="hidden">
@@ -86,16 +70,17 @@
     <script>
         const I18N = {
             fr: {
-                pageTitle: "Données — comparaison des 3 cellules",
+                pageTitle: "Données par cellule",
                 tabCharts: "Courbes",
                 tabDownload: "Télécharger",
                 periodLabel: "Période :",
                 rangeDay: "24 heures", rangeWeek: "7 jours", rangeMonth: "30 jours",
-                titleTemp: "Température moyenne des axes (°C)",
+                titleTemp: "Température par axe (°C)",
                 titleCourant: "Courant moyen des axes (A)",
                 titleCouple: "Couple moyen des axes (N·m)",
                 titlePressure: "Pression pneumatique (bar)",
                 titleLubrix: "Niveau lubrifiant (%)",
+                axisWord: "Axe",
                 cellLabel: "Cellule",
                 titleDownloadCells: "Données brutes par cellule",
                 downloadBtn: "Télécharger CSV",
@@ -109,16 +94,17 @@
                 csvLubrixLabel: "Niveau lubrifiant (%)",
             },
             en: {
-                pageTitle: "Data — 3-cell comparison",
+                pageTitle: "Data by cell",
                 tabCharts: "Charts",
                 tabDownload: "Download",
                 periodLabel: "Period:",
                 rangeDay: "24 hours", rangeWeek: "7 days", rangeMonth: "30 days",
-                titleTemp: "Average axis temperature (°C)",
+                titleTemp: "Temperature per axis (°C)",
                 titleCourant: "Average axis current (A)",
                 titleCouple: "Average axis torque (N·m)",
                 titlePressure: "Pneumatic pressure (bar)",
                 titleLubrix: "Lubricant level (%)",
+                axisWord: "Axis",
                 cellLabel: "Cell",
                 titleDownloadCells: "Raw data per cell",
                 downloadBtn: "Download CSV",
@@ -137,6 +123,9 @@
         const currentRole = localStorage.getItem('user_role');
         const CELLS = [1, 2, 3];
         const CELL_COLORS = ['#0071E3', '#34C759', '#FF9500'];
+        // Mêmes couleurs que cell_detail.html pour la cohérence visuelle
+        // d'un axe donné d'une page à l'autre.
+        const AXIS_COLORS = ['#0071E3', '#34C759', '#FF9500', '#FF3B30', '#5E5CE6', '#AF52DE'];
 
         function t(key) {
             const lang = navLang();
@@ -153,11 +142,13 @@
             opts[0].innerText = t('rangeDay');
             opts[1].innerText = t('rangeWeek');
             opts[2].innerText = t('rangeMonth');
-            document.getElementById('title-temp').innerText = t('titleTemp');
-            document.getElementById('title-courant').innerText = t('titleCourant');
-            document.getElementById('title-couple').innerText = t('titleCouple');
-            document.getElementById('title-pressure').innerText = t('titlePressure');
-            document.getElementById('title-lubrix').innerText = t('titleLubrix');
+            // Les titres des cartes de courbes (title-temp/courant/...) ne
+            // sont plus des éléments statiques : chaque section de cellule
+            // est reconstruite par loadAll() -> cellSectionHtml(), déjà avec
+            // t() appliqué au moment de la génération. Un changement de
+            // langue recharge de toute façon la page entière (cf.
+            // toggleNavLanguage() dans common.js), donc pas besoin de les
+            // retraduire ici.
             document.getElementById('title-download-cells').innerText = t('titleDownloadCells');
             document.getElementById('access-denied-title').innerText = navT('accessDeniedTitle');
             document.getElementById('access-denied-body').innerText = navT('accessDeniedBody');
@@ -208,6 +199,66 @@
             }));
         }
 
+        // Température : un jeu de données par axe (6 lignes), PAS moyennée
+        // entre les axes — cf. demande utilisateur ("pour la température des
+        // axes, il faut que ce soit chaque axe séparément"). Toujours les 6
+        // axes (cette page n'a pas de sélecteur d'axes comme cell_detail.html).
+        // Retourne { datasets, labels } : les 6 axes sont écrits en base par
+        // des INSERT distincts au même tick et peuvent différer d'1s l'un de
+        // l'autre à l'occasion, d'où la liste de catégories fusionnée et
+        // triée explicite (même raison que buildAxisDatasets dans
+        // cell_detail.html, cf. CHG-V2-086).
+        function buildTempDatasetsForCell(axisMeasures) {
+            const byAxis = {};
+            for (const m of axisMeasures) {
+                if (!byAxis[m.axe]) byAxis[m.axe] = [];
+                byAxis[m.axe].push(m);
+            }
+            const decimatedByAxis = {};
+            for (const axe of Object.keys(byAxis)) {
+                decimatedByAxis[axe] = decimateSeries(byAxis[axe], 'time', ['temperature_c'], CHART_MAX_POINTS);
+            }
+            const labels = mergedSortedTimes(Object.values(decimatedByAxis));
+            const datasets = Object.keys(byAxis).sort((a, b) => a - b).map((axe) => ({
+                label: `${t('axisWord')} ${axe}`,
+                data: decimatedByAxis[axe].map((m) => ({ x: m.time, y: m.temperature_c })),
+                borderColor: AXIS_COLORS[(axe - 1) % AXIS_COLORS.length],
+                backgroundColor: 'transparent',
+                tension: 0.25,
+                pointRadius: 0,
+            }));
+            return { datasets, labels };
+        }
+
+        // Génère la section de courbes d'une cellule (5 cartes : température
+        // par axe, courant moyen, couple moyen, pression, lubrifiant) —
+        // reconstruite à chaque loadAll() comme les cartes du dashboard
+        // principal. Le bouton de téléchargement d'image n'est inclus dans
+        // le HTML que pour la Maintenance (plutôt que masqué après coup) :
+        // les cartes étant reconstruites dynamiquement, un passage de
+        // masquage exécuté avant loadAll() n'aurait plus rien à masquer.
+        function cellSectionHtml(cellId) {
+            const dlBtn = (key) => currentRole === 'MAINTENANCE'
+                ? `<button type="button" class="chart-zoom-btn chart-dl-btn" onclick="downloadChart('${key}')" title="Télécharger l'image">&#8681;</button>`
+                : '';
+            const card = (key, title, canvasId) => `
+                <div class="card">
+                    <h2><span>${title}</span> <span>${dlBtn(key)}<button type="button" class="chart-zoom-btn" onclick="zoomChart('${key}')" title="Agrandir">⤢</button></span></h2>
+                    <canvas id="${canvasId}"></canvas>
+                </div>
+            `;
+            return `
+                <h3 style="margin: 24px 0 12px 0; font-size:1.05em; font-weight:600; color:var(--ink);">${cellDisplayName(cellId)}</h3>
+                <div class="grid2">
+                    ${card(`temp-${cellId}`, t('titleTemp'), `chart-temp-${cellId}`)}
+                    ${card(`courant-${cellId}`, t('titleCourant'), `chart-courant-${cellId}`)}
+                    ${card(`couple-${cellId}`, t('titleCouple'), `chart-couple-${cellId}`)}
+                    ${card(`pressure-${cellId}`, t('titlePressure'), `chart-pressure-${cellId}`)}
+                    ${card(`lubrix-${cellId}`, t('titleLubrix'), `chart-lubrix-${cellId}`)}
+                </div>
+            `;
+        }
+
         let charts = {};
         // Dernier jeu de données/label de chaque graphique, pour pouvoir
         // reconstruire une version agrandie identique (voir zoomChart()) —
@@ -224,22 +275,8 @@
         // serveur OPC UA.
         const CHART_MAX_POINTS = 200;
 
-        // Fusionne les horodatages de plusieurs séries (une par cellule) en une
-        // liste triée et dédupliquée. Les 3 cellules sont échantillonnées l'une
-        // après l'autre dans la même itération de la boucle de fond
-        // (web_server.py::_sampling_loop), donc leurs horodatages diffèrent de
-        // quelques secondes les uns des autres : sans fusion triée explicite,
-        // l'axe X "category" de Chart.js se contente de concaténer les
-        // horodatages dans l'ordre où il rencontre chaque nouveau jeu de
-        // données, ce qui produit des retours en arrière visibles sur les
-        // courbes (voir INC-V2-021).
-        function mergedSortedTimes(timedArrays) {
-            const seen = new Set();
-            for (const arr of timedArrays) {
-                for (const item of arr) seen.add(item.time);
-            }
-            return Array.from(seen).sort();
-        }
+        // mergedSortedTimes() est désormais partagée dans common.js (utilisée
+        // aussi par cell_detail.html, cf. CHG-V2-086).
 
         function chartOptions(yLabel, extra = {}) {
             return {
@@ -260,9 +297,15 @@
 
         function lineChart(canvasId, labels, datasets, yLabel) {
             if (charts[canvasId]) charts[canvasId].destroy();
+            // labels omis (undefined) sur les graphiques à un seul jeu de
+            // données (courant/couple/pression/lubrifiant par cellule) :
+            // Chart.js retrouve alors son comportement par défaut, toujours
+            // correct pour une série unique. Fourni explicitement pour la
+            // température par axe (plusieurs séries, cf. buildTempDatasetsForCell).
+            const data = labels ? { labels, datasets } : { datasets };
             charts[canvasId] = new Chart(document.getElementById(canvasId), {
                 type: 'line',
-                data: { labels, datasets },
+                data,
                 options: chartOptions(yLabel),
             });
         }
@@ -300,53 +343,55 @@
                 entry.datasets,
                 buildZoomOptions(entry),
                 entry.labels,
-                `comparaison_3_cellules_${safeTitle}.png`
+                `${safeTitle}.png`
             );
         }
 
+        // Une section indépendante par cellule (cf. demande utilisateur :
+        // "je ne veux pas d'un graphique avec les 3 cellules. Je veux les
+        // cellules indépendantes"), reconstruite à chaque chargement/
+        // changement de période, sur le même principe que les cartes du
+        // dashboard principal (innerHTML régénéré, anciens graphiques
+        // Chart.js détruits via lineChart()).
         async function loadAll() {
             const hours = document.getElementById('range-select').value;
             const perCell = await Promise.all(CELLS.map((id) => fetchCellMeasures(id, hours)));
-            const avgPerCell = perCell
-                .map((data) => averageAxesByTime(data.axis_measures))
-                .map((series) => decimateSeries(
-                    series, 'time', ['temperature_c', 'courant_a', 'couple_nm'], CHART_MAX_POINTS
-                ));
-            const cellMeasuresPerCell = perCell.map((data) => decimateSeries(
-                data.cell_measures, 'time', ['pneumatic_pressure_bar', 'lubrix_level_pct'], CHART_MAX_POINTS
-            ));
 
-            const axisLabels = mergedSortedTimes(avgPerCell);
-            const cellMeasureLabels = mergedSortedTimes(cellMeasuresPerCell);
-
-            const tempSets = [], courantSets = [], coupleSets = [], pressureSets = [], lubrixSets = [];
+            document.getElementById('per-cell-charts').innerHTML =
+                CELLS.map((cellId) => cellSectionHtml(cellId)).join('');
 
             CELLS.forEach((cellId, i) => {
+                const data = perCell[i];
                 const color = CELL_COLORS[i];
-                const label = `${t('cellLabel')} ${cellId}`;
-                const avg = avgPerCell[i];
-                const cellMeasures = cellMeasuresPerCell[i];
 
-                tempSets.push({ label, data: avg.map(m => ({ x: m.time, y: m.temperature_c })), borderColor: color, backgroundColor: 'transparent', tension: 0.25, pointRadius: 0 });
-                courantSets.push({ label, data: avg.map(m => ({ x: m.time, y: m.courant_a })), borderColor: color, backgroundColor: 'transparent', tension: 0.25, pointRadius: 0 });
-                coupleSets.push({ label, data: avg.map(m => ({ x: m.time, y: m.couple_nm })), borderColor: color, backgroundColor: 'transparent', tension: 0.25, pointRadius: 0 });
-                pressureSets.push({ label, data: cellMeasures.map(m => ({ x: m.time, y: m.pneumatic_pressure_bar })), borderColor: color, backgroundColor: 'transparent', tension: 0.25, pointRadius: 0 });
-                lubrixSets.push({ label, data: cellMeasures.map(m => ({ x: m.time, y: m.lubrix_level_pct })), borderColor: color, backgroundColor: 'transparent', tension: 0.25, pointRadius: 0 });
+                const tempResult = buildTempDatasetsForCell(data.axis_measures);
+                const avg = decimateSeries(
+                    averageAxesByTime(data.axis_measures), 'time', ['courant_a', 'couple_nm'], CHART_MAX_POINTS
+                );
+                const cellMeasures = decimateSeries(
+                    data.cell_measures, 'time', ['pneumatic_pressure_bar', 'lubrix_level_pct'], CHART_MAX_POINTS
+                );
+
+                const courantSet = [{ label: t('titleCourant'), data: avg.map((m) => ({ x: m.time, y: m.courant_a })), borderColor: color, backgroundColor: 'transparent', tension: 0.25, pointRadius: 0 }];
+                const coupleSet = [{ label: t('titleCouple'), data: avg.map((m) => ({ x: m.time, y: m.couple_nm })), borderColor: color, backgroundColor: 'transparent', tension: 0.25, pointRadius: 0 }];
+                const pressureSet = [{ label: t('titlePressure'), data: cellMeasures.map((m) => ({ x: m.time, y: m.pneumatic_pressure_bar })), borderColor: color, backgroundColor: 'transparent', tension: 0.25, pointRadius: 0 }];
+                const lubrixSet = [{ label: t('titleLubrix'), data: cellMeasures.map((m) => ({ x: m.time, y: m.lubrix_level_pct })), borderColor: color, backgroundColor: 'transparent', tension: 0.25, pointRadius: 0 }];
+
+                lineChart(`chart-temp-${cellId}`, tempResult.labels, tempResult.datasets, '°C');
+                lineChart(`chart-courant-${cellId}`, undefined, courantSet, 'A');
+                lineChart(`chart-couple-${cellId}`, undefined, coupleSet, 'N·m');
+                lineChart(`chart-pressure-${cellId}`, undefined, pressureSet, 'bar');
+                lineChart(`chart-lubrix-${cellId}`, undefined, lubrixSet, '%');
+
+                const titleFor = (base) => `${base} — ${cellDisplayName(cellId)}`;
+                chartRegistry[`temp-${cellId}`] = { title: titleFor(t('titleTemp')), datasets: tempResult.datasets, labels: tempResult.labels, yLabel: '°C' };
+                chartRegistry[`courant-${cellId}`] = { title: titleFor(t('titleCourant')), datasets: courantSet, yLabel: 'A' };
+                chartRegistry[`couple-${cellId}`] = { title: titleFor(t('titleCouple')), datasets: coupleSet, yLabel: 'N·m' };
+                chartRegistry[`pressure-${cellId}`] = { title: titleFor(t('titlePressure')), datasets: pressureSet, yLabel: 'bar' };
+                chartRegistry[`lubrix-${cellId}`] = { title: titleFor(t('titleLubrix')), datasets: lubrixSet, yLabel: '%' };
             });
 
-            lineChart('chart-temp', axisLabels, tempSets, '°C');
-            lineChart('chart-courant', axisLabels, courantSets, 'A');
-            lineChart('chart-couple', axisLabels, coupleSets, 'N·m');
-            lineChart('chart-pressure', cellMeasureLabels, pressureSets, 'bar');
-            lineChart('chart-lubrix', cellMeasureLabels, lubrixSets, '%');
-
-            chartRegistry.temp = { title: t('titleTemp'), datasets: tempSets, labels: axisLabels, yLabel: '°C' };
-            chartRegistry.courant = { title: t('titleCourant'), datasets: courantSets, labels: axisLabels, yLabel: 'A' };
-            chartRegistry.couple = { title: t('titleCouple'), datasets: coupleSets, labels: axisLabels, yLabel: 'N·m' };
-            chartRegistry.pressure = { title: t('titlePressure'), datasets: pressureSets, labels: cellMeasureLabels, yLabel: 'bar' };
-            chartRegistry.lubrix = { title: t('titleLubrix'), datasets: lubrixSets, labels: cellMeasureLabels, yLabel: '%' };
-
-            lastLoadedData = { axisLabels, cellMeasureLabels, avgPerCell, perCell };
+            lastLoadedData = { perCell };
             renderDownloadTab();
         }
 
@@ -443,10 +488,14 @@
             // utilisateur round 6), mais tout téléchargement (CSV ou image
             // de courbe) reste réservé à la Maintenance : "la seule chose
             // que l'opérateur ne peut pas faire c'est créer des alertes, ni
-            // télécharger les graphs".
+            // télécharger les graphs". Les boutons de téléchargement d'image
+            // ne sont plus masqués après coup ici : cellSectionHtml() ne les
+            // génère désormais que pour currentRole === 'MAINTENANCE' (les
+            // cartes de courbes étant reconstruites à chaque loadAll(), un
+            // masquage exécuté une seule fois ici, avant leur création,
+            // n'aurait plus rien à masquer).
             if (currentRole !== 'MAINTENANCE') {
                 document.getElementById('tab-btn-download').classList.add('hidden');
-                document.querySelectorAll('.chart-dl-btn').forEach((el) => el.classList.add('hidden'));
             }
             document.getElementById('page-content').classList.remove('hidden');
             loadAll();

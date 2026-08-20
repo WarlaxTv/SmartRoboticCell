@@ -397,6 +397,18 @@
             onAxisToggle();
         }
 
+        // Retourne { datasets, labels }. Les 6 axes sont mesurés au même tick
+        // de simulation mais écrits en base via des INSERT distincts : leurs
+        // horodatages peuvent différer d'1s d'un axe à l'autre à l'occasion
+        // (le tick chevauche une frontière de seconde). Une fois chaque axe
+        // décimé indépendamment (cf. decimateSeries), ce léger décalage
+        // suffit à faire apparaître, pour un axe, un horodatage absent des
+        // autres axes déjà traités — sans liste de catégories fusionnée et
+        // triée fournie explicitement à Chart.js, ce nouvel horodatage est
+        // ajouté en fin de liste plutôt qu'à sa place chronologique, ce qui
+        // fait bondir en arrière le tracé de cet axe (même défaut que
+        // INC-V2-021 sur data_comparison.html, cf. mergedSortedTimes dans
+        // common.js).
         function buildAxisDatasets(measures, field) {
             const byAxis = {};
             for (const m of measures) {
@@ -404,17 +416,20 @@
                 if (!byAxis[m.axe]) byAxis[m.axe] = [];
                 byAxis[m.axe].push(m);
             }
-            return Object.keys(byAxis).sort((a, b) => a - b).map((axe) => {
-                const decimated = decimateSeries(byAxis[axe], 'time', [field], CHART_MAX_POINTS);
-                return {
-                    label: `${t('axisWord')} ${axe}`,
-                    data: decimated.map((m) => ({ x: m.time, y: m[field] })),
-                    borderColor: AXIS_COLORS[(axe - 1) % AXIS_COLORS.length],
-                    backgroundColor: 'transparent',
-                    tension: 0.25,
-                    pointRadius: 0,
-                };
-            });
+            const decimatedByAxis = {};
+            for (const axe of Object.keys(byAxis)) {
+                decimatedByAxis[axe] = decimateSeries(byAxis[axe], 'time', [field], CHART_MAX_POINTS);
+            }
+            const labels = mergedSortedTimes(Object.values(decimatedByAxis));
+            const datasets = Object.keys(byAxis).sort((a, b) => a - b).map((axe) => ({
+                label: `${t('axisWord')} ${axe}`,
+                data: decimatedByAxis[axe].map((m) => ({ x: m.time, y: m[field] })),
+                borderColor: AXIS_COLORS[(axe - 1) % AXIS_COLORS.length],
+                backgroundColor: 'transparent',
+                tension: 0.25,
+                pointRadius: 0,
+            }));
+            return { datasets, labels };
         }
 
         function chartOptions(yLabel, extra = {}) {
@@ -434,8 +449,9 @@
             };
         }
 
-        function lineChart(ctx, datasets, yLabel) {
-            return new Chart(ctx, { type: 'line', data: { datasets }, options: chartOptions(yLabel) });
+        function lineChart(ctx, datasets, yLabel, labels) {
+            const data = labels ? { labels, datasets } : { datasets };
+            return new Chart(ctx, { type: 'line', data, options: chartOptions(yLabel) });
         }
 
         // Options de la version agrandie d'une courbe (plein écran modal ET
@@ -451,7 +467,10 @@
         function zoomChart(key) {
             const entry = chartRegistry[key];
             if (!entry) return;
-            openChartZoom(entry.title, entry.datasets, buildZoomOptions(entry));
+            // labels fournis explicitement (voir openChartZoom dans
+            // common.js) pour ne pas réintroduire les sauts en arrière dans
+            // la version agrandie.
+            openChartZoom(entry.title, entry.datasets, buildZoomOptions(entry), entry.labels);
         }
 
         // Télécharge l'image de la version AGRANDIE de la courbe (mêmes
@@ -466,27 +485,27 @@
             downloadZoomedChartImage(
                 entry.datasets,
                 buildZoomOptions(entry),
-                undefined,
+                entry.labels,
                 `cellule_${cellId}_${safeTitle}.png`
             );
         }
 
         function renderAxisCharts() {
-            const tempSets = buildAxisDatasets(lastAxisMeasures, 'temperature_c');
-            const courantSets = buildAxisDatasets(lastAxisMeasures, 'courant_a');
-            const coupleSets = buildAxisDatasets(lastAxisMeasures, 'couple_nm');
+            const tempResult = buildAxisDatasets(lastAxisMeasures, 'temperature_c');
+            const courantResult = buildAxisDatasets(lastAxisMeasures, 'courant_a');
+            const coupleResult = buildAxisDatasets(lastAxisMeasures, 'couple_nm');
 
             if (tempChart) tempChart.destroy();
             if (courantChart) courantChart.destroy();
             if (coupleChart) coupleChart.destroy();
 
-            tempChart = lineChart(document.getElementById('chart-temp'), tempSets, '°C');
-            courantChart = lineChart(document.getElementById('chart-courant'), courantSets, 'A');
-            coupleChart = lineChart(document.getElementById('chart-couple'), coupleSets, 'N·m');
+            tempChart = lineChart(document.getElementById('chart-temp'), tempResult.datasets, '°C', tempResult.labels);
+            courantChart = lineChart(document.getElementById('chart-courant'), courantResult.datasets, 'A', courantResult.labels);
+            coupleChart = lineChart(document.getElementById('chart-couple'), coupleResult.datasets, 'N·m', coupleResult.labels);
 
-            chartRegistry.temp = { title: t('chartTemp'), datasets: tempSets, yLabel: '°C' };
-            chartRegistry.courant = { title: t('chartCourant'), datasets: courantSets, yLabel: 'A' };
-            chartRegistry.couple = { title: t('chartCouple'), datasets: coupleSets, yLabel: 'N·m' };
+            chartRegistry.temp = { title: t('chartTemp'), datasets: tempResult.datasets, labels: tempResult.labels, yLabel: '°C' };
+            chartRegistry.courant = { title: t('chartCourant'), datasets: courantResult.datasets, labels: courantResult.labels, yLabel: 'A' };
+            chartRegistry.couple = { title: t('chartCouple'), datasets: coupleResult.datasets, labels: coupleResult.labels, yLabel: 'N·m' };
         }
 
         async function loadMeasures() {
