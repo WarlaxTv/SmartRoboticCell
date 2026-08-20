@@ -28,20 +28,23 @@ def trust_certificate_windows(cert_path: str) -> None:
         )
         return
     try:
-        subprocess.run(
-            ["certutil", "-user", "-addstore", "Root", cert_path],
-            check=True,
-            capture_output=True,
-            text=True,
+        # certutil est un outil système Windows standard (chemin non contrôlé
+        # par un utilisateur) et l'argument cert_path est toujours un chemin
+        # local fixe fourni par ce script, jamais une entrée utilisateur.
+        cmd = ["certutil", "-user", "-addstore", "Root", cert_path]  # noqa: S607
+        subprocess.run(cmd, check=True, capture_output=True, text=True)  # noqa: S603
+        print(
+            f"✅ Certificat {cert_path} ajouté au magasin de confiance "
+            "Windows (utilisateur courant)."
         )
-        print(f"✅ Certificat {cert_path} ajouté au magasin de confiance Windows (utilisateur courant).")
     except (subprocess.CalledProcessError, FileNotFoundError) as exc:
         print(
-            f"⚠️  Impossible d'ajouter automatiquement {cert_path} au magasin de confiance "
-            f"({exc}). Le site restera affiché comme non sécurisé tant que le certificat "
-            "n'est pas approuvé manuellement (double-clic sur le fichier .pem/.crt > "
-            "Installer le certificat > Utilisateur actuel > Autorités de certification "
-            "racines de confiance)."
+            f"⚠️  Impossible d'ajouter automatiquement {cert_path} au "
+            f"magasin de confiance ({exc}). Le site restera affiché comme "
+            "non sécurisé tant que le certificat n'est pas approuvé "
+            "manuellement (double-clic sur le fichier .pem/.crt > "
+            "Installer le certificat > Utilisateur actuel > Autorités de "
+            "certification racines de confiance)."
         )
 
 
@@ -55,13 +58,15 @@ def generate_self_signed_cert(cert_path, key_path, hostname="localhost"):
     )
 
     # Création du sujet et de l'émetteur
-    subject = issuer = x509.Name([
-        x509.NameAttribute(NameOID.COUNTRY_NAME, "FR"),
-        x509.NameAttribute(NameOID.STATE_OR_PROVINCE_NAME, "Ile-de-France"),
-        x509.NameAttribute(NameOID.LOCALITY_NAME, "Paris"),
-        x509.NameAttribute(NameOID.ORGANIZATION_NAME, "Smart Robotic Cell V2"),
-        x509.NameAttribute(NameOID.COMMON_NAME, hostname),
-    ])
+    subject = issuer = x509.Name(
+        [
+            x509.NameAttribute(NameOID.COUNTRY_NAME, "FR"),
+            x509.NameAttribute(NameOID.STATE_OR_PROVINCE_NAME, "Ile-de-France"),
+            x509.NameAttribute(NameOID.LOCALITY_NAME, "Paris"),
+            x509.NameAttribute(NameOID.ORGANIZATION_NAME, "Smart Robotic Cell V2"),
+            x509.NameAttribute(NameOID.COMMON_NAME, hostname),
+        ]
+    )
 
     # Gestion des noms alternatifs (SAN) pour éviter les erreurs de certificat
     san_list = [x509.DNSName(hostname)]
@@ -69,23 +74,24 @@ def generate_self_signed_cert(cert_path, key_path, hostname="localhost"):
         san_list.append(x509.IPAddress(ipaddress.IPv4Address("127.0.0.1")))
 
     # Création du certificat
-    cert = x509.CertificateBuilder().subject_name(
-        subject
-    ).issuer_name(
-        issuer
-    ).public_key(
-        private_key.public_key()
-    ).serial_number(
-        x509.random_serial_number()
-    ).not_valid_before(
-        datetime.datetime.now(datetime.UTC)
-    ).not_valid_after(
-        # Valide pour 1 an
-        datetime.datetime.now(datetime.UTC) + datetime.timedelta(days=365)
-    ).add_extension(
-        x509.SubjectAlternativeName(san_list),
-        critical=False,
-    ).sign(private_key, hashes.SHA256())
+    cert = (
+        x509.CertificateBuilder()
+        .subject_name(subject)
+        .issuer_name(issuer)
+        .public_key(private_key.public_key())
+        .serial_number(x509.random_serial_number())
+        .not_valid_before(datetime.datetime.now(datetime.UTC))
+        .not_valid_after(
+            # Valide pour 1 an
+            datetime.datetime.now(datetime.UTC)
+            + datetime.timedelta(days=365)
+        )
+        .add_extension(
+            x509.SubjectAlternativeName(san_list),
+            critical=False,
+        )
+        .sign(private_key, hashes.SHA256())
+    )
 
     # Sauvegarde du certificat
     with open(cert_path, "wb") as f:
@@ -93,12 +99,15 @@ def generate_self_signed_cert(cert_path, key_path, hostname="localhost"):
 
     # Sauvegarde de la clé privée
     with open(key_path, "wb") as f:
-        f.write(private_key.private_bytes(
-            encoding=serialization.Encoding.PEM,
-            format=serialization.PrivateFormat.TraditionalOpenSSL,
-            encryption_algorithm=serialization.NoEncryption()
-        ))
+        f.write(
+            private_key.private_bytes(
+                encoding=serialization.Encoding.PEM,
+                format=serialization.PrivateFormat.TraditionalOpenSSL,
+                encryption_algorithm=serialization.NoEncryption(),
+            )
+        )
     print(f"✅ Certificats générés avec succès :\n - {cert_path}\n - {key_path}")
+
 
 if __name__ == "__main__":
     os.makedirs("certs", exist_ok=True)
@@ -106,7 +115,9 @@ if __name__ == "__main__":
     # Régénérer un certificat à chaque démarrage invalide la confiance déjà
     # accordée par le magasin Windows (nouveau certificat = nouvelle preuve
     # de confiance à chaque fois). On ne (re)génère donc que si absent.
-    if not (os.path.exists("certs/opcua_cert.pem") and os.path.exists("certs/opcua_key.pem")):
+    if not (
+        os.path.exists("certs/opcua_cert.pem") and os.path.exists("certs/opcua_key.pem")
+    ):
         generate_self_signed_cert(
             "certs/opcua_cert.pem",
             "certs/opcua_key.pem",
@@ -115,9 +126,13 @@ if __name__ == "__main__":
     else:
         print("Certificat OPC UA déjà présent, réutilisation.")
 
-    web_cert_existed = os.path.exists("certs/web_cert.pem") and os.path.exists("certs/web_key.pem")
+    web_cert_existed = os.path.exists("certs/web_cert.pem") and os.path.exists(
+        "certs/web_key.pem"
+    )
     if not web_cert_existed:
-        generate_self_signed_cert("certs/web_cert.pem", "certs/web_key.pem", "localhost")
+        generate_self_signed_cert(
+            "certs/web_cert.pem", "certs/web_key.pem", "localhost"
+        )
     else:
         print("Certificat Web déjà présent, réutilisation.")
 
