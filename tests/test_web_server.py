@@ -21,7 +21,7 @@ def _make_token(username: str, role: str) -> str:
 
 @pytest.fixture()
 def client(monkeypatch: pytest.MonkeyPatch) -> TestClient:
-    async def _fake_fetch_opcua_data() -> list[dict[str, Any]]:
+    async def _fake_fetch_opcua_data(cell_ids: list[int]) -> list[dict[str, Any]]:
         return [
             {
                 "id": 1,
@@ -86,7 +86,7 @@ def test_status_ok_when_opcua_fails(monkeypatch: pytest.MonkeyPatch) -> None:
     async def _failing_fetch() -> list[dict[str, Any]]:
         raise RuntimeError("opcua down")
 
-    async def _safe_fetch() -> list[dict[str, Any]]:
+    async def _safe_fetch(cell_ids: list[int]) -> list[dict[str, Any]]:
         try:
             return await _failing_fetch()
         except Exception:
@@ -746,7 +746,7 @@ def test_fetch_opcua_data_success(monkeypatch: pytest.MonkeyPatch) -> None:
             return 2
 
     monkeypatch.setattr(opcua_client, "Client", _FakeClient)
-    data = asyncio.run(web_server.fetch_opcua_data())
+    data = asyncio.run(web_server.fetch_opcua_data([1, 2, 3]))
     assert len(data) == 3
     assert data[0]["name"] == "CELL1"
     assert data[2]["id"] == 3
@@ -868,7 +868,7 @@ def test_generic_request_appears_in_status_until_acknowledged(
 
     maint_token = _make_token("luc_maint", "MAINTENANCE")
     ack_resp = client.post(
-        "/api/maintenance/acknowledge-request?cell_id=8&message=Vérifié%2C%20RAS",
+        "/api/maintenance/acknowledge-request?cell_id=8&probleme_resolu=true&message=Vérifié%2C%20RAS",
         headers=_auth_header(maint_token),
     )
     assert ack_resp.status_code == 200
@@ -905,7 +905,7 @@ def test_acknowledge_request_forbidden_for_operator(client: TestClient) -> None:
 def test_acknowledge_unknown_request_returns_404(client: TestClient) -> None:
     maint_token = _make_token("luc_maint", "MAINTENANCE")
     resp = client.post(
-        "/api/maintenance/acknowledge-request?cell_id=42",
+        "/api/maintenance/acknowledge-request?cell_id=42&probleme_resolu=true",
         headers=_auth_header(maint_token),
     )
     assert resp.status_code == 404
@@ -1386,7 +1386,7 @@ def test_sampling_loop_persists_one_iteration_then_stops(
     itération, une fois les écritures en base effectuées.
     """
 
-    async def _fake_fetch_opcua_data() -> list[dict[str, Any]]:
+    async def _fake_fetch_opcua_data(cell_ids: list[int]) -> list[dict[str, Any]]:
         return [
             {
                 "id": 9,
