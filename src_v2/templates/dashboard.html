@@ -111,6 +111,8 @@
                 serverConnectionError: "Erreur de connexion au serveur.",
                 appTitle: "Supervision Multi-Cellules",
                 readOnly: "Lecture Seule",
+                readOnlyMaintenance: "Actions Maintenance",
+                readOnlyAdmin: "Accès Administrateur",
                 signOut: "Déconnexion",
                 opcuaConnecting: "Connexion au serveur OPC UA en cours...",
                 simuTitle: "Panneau de Simulation (POC)",
@@ -177,6 +179,8 @@
                 serverConnectionError: "Server connection error.",
                 appTitle: "Multi-Cell Monitoring",
                 readOnly: "Read Only",
+                readOnlyMaintenance: "Maintenance Actions",
+                readOnlyAdmin: "Admin Access",
                 signOut: "Sign Out",
                 opcuaConnecting: "Connecting to OPC UA server...",
                 simuTitle: "Simulation Panel (POC)",
@@ -242,6 +246,18 @@
             return s;
         }
 
+        // Le lien OPC UA (couche OT) reste lecture seule pour tous les
+        // roles -- aucune action utilisateur n'ecrit jamais directement sur
+        // les automates/robots. Ce badge decrit en revanche le niveau
+        // d'ecriture cote IT (base de donnees) : Operateur ne peut que
+        // consulter et demander une intervention, Maintenance et Admin
+        // peuvent ecrire (acquitter, intervenir, administrer).
+        function readOnlyKeyForRole(role) {
+            if (role === 'ADMIN') return 'readOnlyAdmin';
+            if (role === 'MAINTENANCE') return 'readOnlyMaintenance';
+            return 'readOnly';
+        }
+
         function applyLanguage() {
             document.documentElement.lang = currentLang;
             document.title = t('title');
@@ -268,7 +284,7 @@
             const appTitle = document.getElementById('app-title');
             if (appTitle) appTitle.innerText = t('appTitle');
             const badgeReadOnly = document.getElementById('badge-read-only');
-            if (badgeReadOnly) badgeReadOnly.innerText = t('readOnly');
+            if (badgeReadOnly) badgeReadOnly.innerText = t(readOnlyKeyForRole(currentRole));
             const opcuaConnecting = document.getElementById('opcua-connecting');
             if (opcuaConnecting) opcuaConnecting.innerText = t('opcuaConnecting');
             const simuTitle = document.getElementById('simu-title');
@@ -375,6 +391,11 @@
         function showApp() {
             document.getElementById('login-screen').classList.add('hidden');
             document.getElementById('app-screen').classList.remove('hidden');
+            // Reappliquer les textes dependant du role (notamment le badge
+            // lecture seule / droits d'ecriture) : sur un login sans
+            // rechargement de page, currentRole vient seulement d'etre mis a
+            // jour et applyLanguage() n'avait ete appele qu'avant connexion.
+            applyLanguage();
             renderTopNav('main', currentRole);
 
             // On s'assure que le panneau de simu est bien affiché pour tout le monde
