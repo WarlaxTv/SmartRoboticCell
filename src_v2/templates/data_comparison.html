@@ -416,7 +416,7 @@
             header.push(t('csvPressureLabel'), t('csvLubrixLabel'));
 
             const rows = allTimes.map((time) => {
-                const row = [time];
+                const row = [formatDateTime(time)];
                 for (let axe = 1; axe <= 6; axe++) {
                     const m = axisByTime[time] && axisByTime[time][axe];
                     row.push(m ? m.temperature_c : '', m ? m.courant_a : '', m ? m.couple_nm : '');

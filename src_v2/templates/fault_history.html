@@ -41,11 +41,19 @@
             </div>
             <div class="filter-bar-group">
                 <label for="since-filter" class="filter-bar-label" id="filter-since-label">Du :</label>
-                <input type="date" id="since-filter" class="filter-input" onchange="fetchFaults()">
+                <div class="date-field">
+                    <input type="text" id="since-filter" class="filter-input date-text" inputmode="numeric" maxlength="10" autocomplete="off">
+                    <button type="button" class="date-picker-btn"></button>
+                    <input type="date" class="date-native" tabindex="-1" aria-hidden="true">
+                </div>
             </div>
             <div class="filter-bar-group">
                 <label for="until-filter" class="filter-bar-label" id="filter-until-label">Au :</label>
-                <input type="date" id="until-filter" class="filter-input" onchange="fetchFaults()">
+                <div class="date-field">
+                    <input type="text" id="until-filter" class="filter-input date-text" inputmode="numeric" maxlength="10" autocomplete="off">
+                    <button type="button" class="date-picker-btn"></button>
+                    <input type="date" class="date-native" tabindex="-1" aria-hidden="true">
+                </div>
             </div>
             <button class="btn btn-reset" id="filter-reset-btn" onclick="resetFilters()">Réinitialiser</button>
             <button class="btn hidden" id="download-csv-btn" onclick="downloadFaultsCsv()">Télécharger CSV</button>
@@ -124,6 +132,8 @@
                 csvSeverity: "Gravité",
                 csvDescription: "Description",
                 csvStatus: "Statut",
+                severityCritical: "Critique",
+                severityWarning: "Avertissement",
             },
             en: {
                 pageTitle: "Fault History",
@@ -156,6 +166,8 @@
                 csvSeverity: "Severity",
                 csvDescription: "Description",
                 csvStatus: "Status",
+                severityCritical: "Critical",
+                severityWarning: "Warning",
             },
         };
 
@@ -166,6 +178,14 @@
         function t(key) {
             const lang = navLang();
             return (I18N[lang] && I18N[lang][key]) || I18N.fr[key] || key;
+        }
+
+        // Gravité lisible dans la langue de l'interface (utilisée par le CSV :
+        // la valeur brute "critique"/"avertissement" restait en français en EN).
+        function severityLabel(severity) {
+            if (severity === 'critique') return t('severityCritical');
+            if (severity === 'avertissement') return t('severityWarning');
+            return severity;
         }
 
         function statusLabel(faultStatus) {
@@ -217,8 +237,8 @@
         function resetFilters() {
             document.getElementById('cell-filter').value = '';
             document.getElementById('status-filter').value = '';
-            document.getElementById('since-filter').value = '';
-            document.getElementById('until-filter').value = '';
+            resetDateField('since-filter');
+            resetDateField('until-filter');
             fetchFaults();
         }
 
@@ -226,8 +246,10 @@
             const params = new URLSearchParams();
             const cellId = document.getElementById('cell-filter').value;
             const statusVal = document.getElementById('status-filter').value;
-            const since = document.getElementById('since-filter').value;
-            const until = document.getElementById('until-filter').value;
+            // Dates saisies au format de la langue, converties en ISO (AAAA-MM-JJ)
+            // pour l'API (cf. initDateFields() dans common.js).
+            const since = getDateFieldIso('since-filter');
+            const until = getDateFieldIso('until-filter');
             if (cellId) params.set('cell_id', cellId);
             if (statusVal) params.set('fault_status', statusVal);
             if (since) params.set('since', `${since} 00:00:00`);
@@ -243,7 +265,7 @@
                 : '';
             return `<div class="history-item">
                 <div class="history-item-main">
-                    <strong>${f.time}</strong> — ${cellDisplayName(f.cell_id)} — <span class="sev-${f.severity}">${translateFaultText(f.type)}</span><span class="${faultStatusTagClass(f.fault_status)}">(${statusLabel(f.fault_status)})</span>
+                    <strong>${formatDateTime(f.time)}</strong> — ${cellDisplayName(f.cell_id)} — <span class="sev-${f.severity}">${translateFaultText(f.type)}</span><span class="${faultStatusTagClass(f.fault_status)}">(${statusLabel(f.fault_status)})</span>
                     <div style="color:#6E6E73;">${translateFaultText(f.description)}</div>
                 </div>
                 ${interveneBtn}
@@ -281,10 +303,10 @@
         function downloadFaultsCsv() {
             const header = [t('csvTime'), t('csvCell'), t('csvType'), t('csvSeverity'), t('csvDescription'), t('csvStatus')];
             const rows = lastFaults.map((f) => [
-                f.time,
+                formatDateTime(f.time),
                 cellDisplayName(f.cell_id),
                 translateFaultText(f.type),
-                f.severity,
+                severityLabel(f.severity),
                 translateFaultText(f.description),
                 statusLabel(f.fault_status),
             ]);
@@ -345,6 +367,7 @@
                 await loadCellNames();
                 populateCellFilterOptions();
                 applyLanguage();
+                initDateFields(fetchFaults);
                 // Téléchargement réservé à la Maintenance/Admin, comme les
                 // autres exports du site (cf. data_comparison.html).
                 if (hasMaintenanceRights(currentRole)) {

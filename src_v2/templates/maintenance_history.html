@@ -32,11 +32,19 @@
             </div>
             <div class="filter-bar-group">
                 <label for="since-filter" class="filter-bar-label" id="filter-since-label">Du :</label>
-                <input type="date" id="since-filter" class="filter-input" onchange="fetchAll()">
+                <div class="date-field">
+                    <input type="text" id="since-filter" class="filter-input date-text" inputmode="numeric" maxlength="10" autocomplete="off">
+                    <button type="button" class="date-picker-btn"></button>
+                    <input type="date" class="date-native" tabindex="-1" aria-hidden="true">
+                </div>
             </div>
             <div class="filter-bar-group">
                 <label for="until-filter" class="filter-bar-label" id="filter-until-label">Au :</label>
-                <input type="date" id="until-filter" class="filter-input" onchange="fetchAll()">
+                <div class="date-field">
+                    <input type="text" id="until-filter" class="filter-input date-text" inputmode="numeric" maxlength="10" autocomplete="off">
+                    <button type="button" class="date-picker-btn"></button>
+                    <input type="date" class="date-native" tabindex="-1" aria-hidden="true">
+                </div>
             </div>
             <button class="btn btn-reset" id="filter-reset-btn" onclick="resetFilters()">Réinitialiser</button>
             <button class="btn hidden" id="download-csv-btn" onclick="downloadMaintenanceCsv()">Télécharger CSV</button>
@@ -150,7 +158,6 @@
                 csvAction: "Action",
                 csvAuthor: "Auteur",
                 csvOutcome: "Résultat",
-                csvOutcomeNone: "",
             },
             en: {
                 pageTitle: "Maintenance Intervention History",
@@ -190,7 +197,6 @@
                 csvAction: "Action",
                 csvAuthor: "Author",
                 csvOutcome: "Outcome",
-                csvOutcomeNone: "",
             },
         };
 
@@ -245,8 +251,8 @@
 
         function resetFilters() {
             document.getElementById('cell-filter').value = '';
-            document.getElementById('since-filter').value = '';
-            document.getElementById('until-filter').value = '';
+            resetDateField('since-filter');
+            resetDateField('until-filter');
             fetchAll();
         }
 
@@ -258,8 +264,10 @@
         function buildQuery() {
             const params = new URLSearchParams();
             const cellId = document.getElementById('cell-filter').value;
-            const since = document.getElementById('since-filter').value;
-            const until = document.getElementById('until-filter').value;
+            // Dates saisies au format de la langue, converties en ISO (AAAA-MM-JJ)
+            // pour l'API (cf. initDateFields() dans common.js).
+            const since = getDateFieldIso('since-filter');
+            const until = getDateFieldIso('until-filter');
             if (cellId) params.set('cell_id', cellId);
             if (since) params.set('since', `${since} 00:00:00`);
             if (until) params.set('until', `${until} 23:59:59`);
@@ -303,7 +311,7 @@
                         container.innerHTML = t('noInterventions');
                     } else {
                         container.innerHTML = data.history.slice().reverse().map(h =>
-                            `<div class="history-item"><div class="history-item-main"><strong>${h.time}</strong> — ${cellDisplayName(h.cell_id)} : ${h.action} <em>(${t('requestedBy')} ${h.user})</em> ${outcomeTag(h)}</div></div>`
+                            `<div class="history-item"><div class="history-item-main"><strong>${formatDateTime(h.time)}</strong> — ${cellDisplayName(h.cell_id)} : ${h.action} <em>(${t('requestedBy')} ${h.user})</em> ${outcomeTag(h)}</div></div>`
                         ).join('');
                     }
                 }
@@ -313,7 +321,10 @@
         function outcomeCsvValue(item) {
             if (item.probleme_resolu === true) return t('outcomeResolved');
             if (item.probleme_resolu === false) return t('outcomeOngoing');
-            return t('csvOutcomeNone');
+            // Cellule vide (pas de résultat pour cette ligne). Ne pas passer par
+            // t() : une traduction "" est falsy et t() renverrait alors la clé
+            // brute ("csvOutcomeNone") dans le fichier.
+            return '';
         }
 
         // Téléchargement CSV de l'historique des interventions actuellement
@@ -322,7 +333,7 @@
         function downloadMaintenanceCsv() {
             const header = [t('csvTime'), t('csvCell'), t('csvAction'), t('csvAuthor'), t('csvOutcome')];
             const rows = lastHistory.slice().reverse().map((h) => [
-                h.time,
+                formatDateTime(h.time),
                 cellDisplayName(h.cell_id),
                 h.action,
                 h.user,
@@ -345,7 +356,7 @@
                         container.innerHTML = t('noPending');
                     } else {
                         container.innerHTML = data.faults.map(f =>
-                            `<div class="history-item"><div class="history-item-main"><strong>${f.time}</strong> — ${cellDisplayName(f.cell_id)} — <span class="sev-${f.severity}">${translateFaultText(f.type)}</span><div style="color:#6E6E73;">${translateFaultText(f.description)}</div></div></div>`
+                            `<div class="history-item"><div class="history-item-main"><strong>${formatDateTime(f.time)}</strong> — ${cellDisplayName(f.cell_id)} — <span class="sev-${f.severity}">${translateFaultText(f.type)}</span><div style="color:#6E6E73;">${translateFaultText(f.description)}</div></div></div>`
                         ).join('');
                     }
                 }
@@ -451,6 +462,7 @@
                 await loadCellNames();
                 populateCellFilterOptions();
                 applyLanguage();
+                initDateFields(fetchAll);
                 // Le panneau "Demandes en attente" (défauts actifs + demandes
                 // génériques, avec actions "Intervenir"/"Prise en charge") est un
                 // outil de travail Maintenance ; l'Opérateur ne voit que

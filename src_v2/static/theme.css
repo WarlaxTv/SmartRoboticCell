@@ -17,11 +17,11 @@
     --bg: #F5F5F7;
     --panel: #FFFFFF;
     --border: #E5E5EA;
-    --ok: #34C759;
+    --ok: #1B7A3D;   /* RGAA/WCAG AA : #34C759 d'origine ratio 2.2:1 sur blanc, insuffisant pour du texte (cible >=4.5:1) */
     --ok-bg: #EAFBEF;
-    --fault: #FF3B30;
+    --fault: #D70015;   /* RGAA/WCAG AA : #FF3B30 d'origine ratio 3.55:1 sur blanc, insuffisant pour du texte normal */
     --fault-bg: #FFEEED;
-    --warn: #FF9500;
+    --warn: #A85300;   /* RGAA/WCAG AA : #FF9500 d'origine ratio 2.2:1 sur blanc, insuffisant pour du texte */
     --warn-bg: #FFF4E5;
     --test: #5E5CE6;
     --radius-lg: 20px;
@@ -236,6 +236,30 @@ a.btn, a.btn:hover, a.btn:visited { text-decoration: none; }
 }
 .filter-input { cursor: text; font-weight: 500; }
 .filter-input[type="date"] { font-weight: 600; }
+
+/* Champ de date localisé (jj/mm/aaaa en FR, mm/dd/yyyy en EN) + calendrier
+   natif déclenché par un bouton — cf. initDateFields() dans common.js. */
+.date-field { position: relative; display: inline-flex; align-items: center; gap: 4px; }
+.date-field .date-text { width: 118px; }
+.filter-input.invalid { border-color: var(--fault); color: var(--fault); }
+.date-picker-btn {
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 34px; height: 34px; padding: 0; border-radius: 999px;
+    border: 1px solid var(--border); background: white; color: var(--muted);
+    cursor: pointer;
+}
+.date-picker-btn:hover { color: var(--ink); border-color: var(--muted); }
+.date-native {
+    position: absolute; left: 0; bottom: 0; width: 1px; height: 1px;
+    opacity: 0; pointer-events: none;
+}
+
+/* Texte réservé aux lecteurs d'écran (titre de page conservé pour RGAA
+   alors qu'il n'est plus affiché visuellement). */
+.sr-only {
+    position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0;
+    overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0;
+}
 .filter-bar .btn-reset { background: var(--muted); }
 .filter-bar .btn-reset:hover { background: #57575c; }
 

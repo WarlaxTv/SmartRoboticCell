@@ -1,4 +1,4 @@
-"""Persistence layer for Smart Robotic Cell V2.
+"""Persistence layer for Smart Robotic Cell.
 
 Remplace le stockage en mémoire (dict/list) par une vraie base SQLite via
 SQLModel, pour les données qui doivent survivre à un redémarrage du serveur :
@@ -256,8 +256,22 @@ def init_db() -> None:
     Idempotent : peut être appelée à chaque démarrage (module-level, y
     compris sous pytest/TestClient) sans dupliquer les données.
     """
+    from sqlalchemy import text
 
     SQLModel.metadata.create_all(engine)
+
+    with engine.connect() as conn:
+        trigger_sql = """
+        CREATE TRIGGER IF NOT EXISTS prevent_history_deletion
+        BEFORE DELETE ON historiquemaintenance
+        BEGIN
+            SELECT RAISE(ABORT, 'Sécurité : La suppression d''un historique de maintenance est strictement interdite.');
+        END;
+        """
+        conn.execute(text(trigger_sql))
+        conn.commit()
+
+        
     with Session(engine) as session:
         if session.exec(select(Utilisateur)).first() is None:
             # Base tout juste créée (premier lancement) : amorce les 3

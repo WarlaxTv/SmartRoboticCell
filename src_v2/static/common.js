@@ -658,13 +658,238 @@ function decimateSeries(points, timeField, valueFields, maxPoints) {
     return result;
 }
 
-/* ---------- Export CSV (partagé entre data_comparison.html,
-   fault_history.html et maintenance_history.html) ---------- */
+/* ---------- Dates localisées (FR / EN) ----------
+ *
+ * Les horodatages renvoyés par l'API sont des chaînes "AAAA-MM-JJ HH:MM:SS"
+ * (heure locale du serveur, cf. db.py). On les affiche selon la langue de
+ * l'interface (bouton FR/EN du bandeau) :
+ *   - FR : 11/09/2026 15:52:10        (jj/mm/aaaa, 24 h)
+ *   - EN : 09/11/2026 3:52:10 PM      (mm/dd/yyyy, 12 h AM/PM)
+ * Le découpage se fait sur la chaîne elle-même (pas de `new Date()`), pour
+ * éviter tout décalage de fuseau horaire sur une heure déjà locale.
+ * Pour changer le format anglais (ex. jj/mm/aaaa à l'anglaise), il suffit
+ * de modifier DATE_FORMATS ci-dessous. */
 
-function toCsvValue(v) {
+const DATE_FORMATS = {
+    fr: { order: ['d', 'm', 'y'], sep: '/', hour12: false, placeholder: 'jj/mm/aaaa' },
+    en: { order: ['m', 'd', 'y'], sep: '/', hour12: true, placeholder: 'mm/dd/yyyy' },
+};
+
+function _dateFormat(lang) {
+    return DATE_FORMATS[lang] || DATE_FORMATS.fr;
+}
+
+function _pad2(n) {
+    return String(n).padStart(2, '0');
+}
+
+function parseDbTimestamp(value) {
+    const m = /^(\d{4})-(\d{2})-(\d{2})(?:[ T](\d{2}):(\d{2})(?::(\d{2}))?)?/.exec(String(value ?? '').trim());
+    if (!m) return null;
+    return {
+        y: Number(m[1]),
+        mo: Number(m[2]),
+        d: Number(m[3]),
+        h: m[4] === undefined ? null : Number(m[4]),
+        mi: m[5] === undefined ? 0 : Number(m[5]),
+        s: m[6] === undefined ? 0 : Number(m[6]),
+    };
+}
+
+function _formatDateParts(p, fmt) {
+    const parts = { d: _pad2(p.d), m: _pad2(p.mo), y: String(p.y) };
+    return fmt.order.map((k) => parts[k]).join(fmt.sep);
+}
+
+/** Date seule ("AAAA-MM-JJ" ou horodatage complet) au format de la langue. */
+function formatDate(value, lang = navLang()) {
+    const p = parseDbTimestamp(value);
+    if (!p) return value === null || value === undefined ? '' : String(value);
+    return _formatDateParts(p, _dateFormat(lang));
+}
+
+/** Date + heure au format de la langue ; valeur illisible renvoyée telle quelle. */
+function formatDateTime(value, lang = navLang()) {
+    const p = parseDbTimestamp(value);
+    if (!p) return value === null || value === undefined ? '' : String(value);
+    const fmt = _dateFormat(lang);
+    const datePart = _formatDateParts(p, fmt);
+    if (p.h === null) return datePart;
+    if (!fmt.hour12) return `${datePart} ${_pad2(p.h)}:${_pad2(p.mi)}:${_pad2(p.s)}`;
+    const suffix = p.h >= 12 ? 'PM' : 'AM';
+    const h12 = p.h % 12 === 0 ? 12 : p.h % 12;
+    return `${datePart} ${h12}:${_pad2(p.mi)}:${_pad2(p.s)} ${suffix}`;
+}
+
+/**
+ * Lit une date saisie à la main dans la langue courante et la renvoie au
+ * format ISO "AAAA-MM-JJ" (utilisé par l'API), ou null si elle est invalide
+ * (ex. 31/02/2026). Accepte aussi l'ISO direct, et "/", "-", "." ou espace
+ * comme séparateurs ; une année sur 2 chiffres est prise dans les années 2000.
+ */
+function parseLocalizedDate(text, lang = navLang()) {
+    const raw = String(text ?? '').trim();
+    if (!raw) return null;
+    let y;
+    let mo;
+    let d;
+    const iso = /^(\d{4})[-/.](\d{1,2})[-/.](\d{1,2})$/.exec(raw);
+    if (iso) {
+        [y, mo, d] = [Number(iso[1]), Number(iso[2]), Number(iso[3])];
+    } else {
+        const parts = raw.split(/[\/.\-\s]+/);
+        if (parts.length !== 3 || parts.some((x) => !/^\d+$/.test(x))) return null;
+        const byKey = {};
+        _dateFormat(lang).order.forEach((k, i) => { byKey[k] = Number(parts[i]); });
+        ({ y, m: mo, d } = byKey);
+        if (parts[_dateFormat(lang).order.indexOf('y')].length <= 2) y += 2000;
+    }
+    const check = new Date(Date.UTC(y, mo - 1, d));
+    if (
+        Number.isNaN(check.getTime())
+        || check.getUTCFullYear() !== y
+        || check.getUTCMonth() !== mo - 1
+        || check.getUTCDate() !== d
+    ) return null;
+    return `${String(y).padStart(4, '0')}-${_pad2(mo)}-${_pad2(d)}`;
+}
+
+/* ---------- Champ de date localisé (barres de filtre) ----------
+ *
+ * Un <input type="date"> natif s'affiche selon la langue du NAVIGATEUR, pas
+ * celle de l'interface : passer le site en EN ne changeait donc rien au
+ * format du filtre. Ce composant affiche un champ texte au format de la
+ * langue de l'interface (jj/mm/aaaa ou mm/dd/yyyy) et garde le calendrier
+ * natif accessible via un bouton. Structure attendue dans la page :
+ *
+ *   <div class="date-field">
+ *       <input type="text" id="since-filter" class="filter-input date-text">
+ *       <button type="button" class="date-picker-btn"></button>
+ *       <input type="date" class="date-native" tabindex="-1" aria-hidden="true">
+ *   </div>
+ *
+ * La valeur exploitable par l'API (ISO) se lit avec getDateFieldIso(id).
+ */
+
+const DATE_FIELD_I18N = {
+    fr: { calendar: 'Ouvrir le calendrier', invalid: 'Date invalide — format attendu : ' },
+    en: { calendar: 'Open calendar', invalid: 'Invalid date — expected format: ' },
+};
+
+function _dateFieldText(key) {
+    const lang = navLang();
+    return (DATE_FIELD_I18N[lang] || DATE_FIELD_I18N.fr)[key];
+}
+
+function getDateFieldIso(id) {
+    const input = document.getElementById(id);
+    return input ? (input.dataset.iso || '') : '';
+}
+
+function setDateFieldIso(id, iso) {
+    const input = document.getElementById(id);
+    if (!input) return;
+    input.dataset.iso = iso || '';
+    input.value = iso ? formatDate(iso) : '';
+    input.classList.remove('invalid');
+    input.removeAttribute('aria-invalid');
+}
+
+function resetDateField(id) {
+    setDateFieldIso(id, '');
+}
+
+/** À appeler une fois par page, après le chargement du DOM. `onChange` est
+ *  rappelé quand une date valide est saisie/choisie ou quand le champ est vidé. */
+function initDateFields(onChange) {
+    const fmt = _dateFormat(navLang());
+    document.querySelectorAll('.date-field').forEach((wrapper) => {
+        const text = wrapper.querySelector('.date-text');
+        const picker = wrapper.querySelector('.date-native');
+        const button = wrapper.querySelector('.date-picker-btn');
+        if (!text) return;
+
+        text.placeholder = fmt.placeholder;
+        text.dataset.iso = '';
+        if (button) {
+            button.setAttribute('aria-label', _dateFieldText('calendar'));
+            button.title = _dateFieldText('calendar');
+            button.innerHTML = '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="18" rx="3"/><path d="M16 2v4M8 2v4M3 10h18"/></svg>';
+        }
+
+        text.addEventListener('change', () => {
+            const value = text.value.trim();
+            if (!value) {
+                setDateFieldIso(text.id, '');
+                if (onChange) onChange();
+                return;
+            }
+            const iso = parseLocalizedDate(value);
+            if (iso) {
+                setDateFieldIso(text.id, iso);
+                if (onChange) onChange();
+            } else {
+                text.classList.add('invalid');
+                text.setAttribute('aria-invalid', 'true');
+                text.title = _dateFieldText('invalid') + fmt.placeholder;
+            }
+        });
+        text.addEventListener('keydown', (evt) => {
+            if (evt.key === 'Enter') text.dispatchEvent(new Event('change'));
+        });
+
+        if (button && picker) {
+            button.addEventListener('click', () => {
+                picker.value = text.dataset.iso || '';
+                try {
+                    picker.showPicker();
+                } catch (e) {
+                    picker.focus();
+                    picker.click();
+                }
+            });
+            picker.addEventListener('change', () => {
+                setDateFieldIso(text.id, picker.value);
+                if (onChange) onChange();
+            });
+        }
+    });
+}
+
+/* ---------- Export CSV (partagé entre data_comparison.html,
+   fault_history.html et maintenance_history.html) ----------
+ *
+ * Mise en forme adaptée à la langue de l'interface, pour que le fichier
+ * s'ouvre correctement d'un double-clic dans Excel :
+ *   - FR : séparateur ";" et virgule décimale (Excel FR sépare les colonnes
+ *     sur ";" — avec "," tout atterrissait dans une seule colonne — et prend
+ *     "6.2" pour du texte, voire une date) ;
+ *   - EN : séparateur "," et point décimal.
+ * Les nombres sont exportés en tant que nombres (calculs/tris possibles
+ * dans Excel), les textes commençant par = + - @ sont neutralisés (injection
+ * de formule), et les dates suivent le format de la langue (formatDateTime). */
+
+function csvDelimiter(lang = navLang()) {
+    return lang === 'en' ? ',' : ';';
+}
+
+function toCsvValue(v, lang = navLang()) {
     if (v === null || v === undefined) return '';
-    const s = String(v);
-    if (/[",;\n]/.test(s)) return '"' + s.replace(/"/g, '""') + '"';
+    const delimiter = csvDelimiter(lang);
+    let s;
+    if (typeof v === 'number') {
+        if (!Number.isFinite(v)) return '';
+        // toPrecision(12) : retire le bruit binaire (6.200000000000001 → 6.2).
+        s = String(parseFloat(v.toPrecision(12)));
+        if (lang !== 'en') s = s.replace('.', ',');
+        return s;
+    }
+    s = String(v);
+    // Injection de formule (Excel/LibreOffice interprètent =, +, -, @ en tête).
+    if (/^[=+\-@\t\r]/.test(s)) s = "'" + s;
+    if (s.includes('"') || s.includes(delimiter) || /[\r\n]/.test(s)) {
+        return '"' + s.replace(/"/g, '""') + '"';
+    }
     return s;
 }
 
@@ -677,7 +902,9 @@ function toCsvValue(v) {
  * d'historique (pannes, maintenance).
  */
 function downloadCsv(filename, headerRow, rows) {
-    const lines = [headerRow, ...rows].map((row) => row.map(toCsvValue).join(','));
+    const lang = navLang();
+    const delimiter = csvDelimiter(lang);
+    const lines = [headerRow, ...rows].map((row) => row.map((v) => toCsvValue(v, lang)).join(delimiter));
     const csvContent = String.fromCharCode(0xFEFF) + lines.join('\r\n');
     const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
     const url = URL.createObjectURL(blob);

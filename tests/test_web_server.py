@@ -335,6 +335,113 @@ def test_ack_maint_does_not_clear_operator_generic_request(
     }
 
 
+def test_preventive_maintenance_resolved_resets_counter_and_logs(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Le bouton "Maintenance effectuée" du dashboard ouvre la popup
+    "Enregistrer une intervention" : avec "Problème résolu", la maintenance
+    est réalisée (compteur remis à zéro via ack_maint) et tracée avec les
+    notes saisies."""
+
+    async def _due(_cell_id: int) -> bool:
+        return True
+
+    calls: list[tuple[int, str]] = []
+
+    async def _apply(cell_id: int, action: str) -> None:
+        calls.append((cell_id, action))
+
+    monkeypatch.setattr(web_server, "is_maintenance_due", _due)
+    monkeypatch.setattr(web_server, "apply_simulated_action", _apply)
+    client = TestClient(web_server.app)
+    token = _make_token("luc_maint", "MAINTENANCE")
+
+    resp = client.post(
+        "/api/maintenance/preventive?cell_id=941&probleme_resolu=true"
+        "&notes=Graissage effectué",
+        headers=_auth_header(token),
+    )
+    assert resp.status_code == 200
+    assert calls == [(941, "ack_maint")]
+
+    history = client.get(
+        "/api/maintenance/history?cell_id=941", headers=_auth_header(token)
+    ).json()["history"]
+    assert len(history) == 1
+    assert history[0]["action"].startswith("Intervention terminée sur Cellule 941")
+    assert "Graissage effectué" in history[0]["action"]
+    assert history[0]["probleme_resolu"] is True
+    assert history[0]["user"] == "luc_maint"
+
+
+def test_preventive_maintenance_ongoing_keeps_counter(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """"Pris en charge, reste actif" : l'intervention est tracée mais le
+    compteur n'est PAS remis à zéro (la maintenance reste due)."""
+
+    async def _due(_cell_id: int) -> bool:
+        return True
+
+    async def _apply(_cell_id: int, _action: str) -> None:
+        raise AssertionError(
+            "apply_simulated_action ne doit pas être appelé quand le "
+            "problème reste actif"
+        )
+
+    monkeypatch.setattr(web_server, "is_maintenance_due", _due)
+    monkeypatch.setattr(web_server, "apply_simulated_action", _apply)
+    client = TestClient(web_server.app)
+    token = _make_token("luc_maint", "MAINTENANCE")
+
+    resp = client.post(
+        "/api/maintenance/preventive?cell_id=942&probleme_resolu=false",
+        headers=_auth_header(token),
+    )
+    assert resp.status_code == 200
+
+    history = client.get(
+        "/api/maintenance/history?cell_id=942", headers=_auth_header(token)
+    ).json()["history"]
+    assert len(history) == 1
+    assert "prise en charge" in history[0]["action"]
+    assert history[0]["probleme_resolu"] is False
+
+
+def test_preventive_maintenance_rejected_when_not_due(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def _not_due(_cell_id: int) -> bool:
+        return False
+
+    async def _apply(_cell_id: int, _action: str) -> None:
+        raise AssertionError("apply_simulated_action ne doit pas être appelé")
+
+    monkeypatch.setattr(web_server, "is_maintenance_due", _not_due)
+    monkeypatch.setattr(web_server, "apply_simulated_action", _apply)
+    client = TestClient(web_server.app)
+    token = _make_token("luc_maint", "MAINTENANCE")
+
+    resp = client.post(
+        "/api/maintenance/preventive?cell_id=943&probleme_resolu=true",
+        headers=_auth_header(token),
+    )
+    assert resp.status_code == 409
+    history = client.get(
+        "/api/maintenance/history?cell_id=943", headers=_auth_header(token)
+    ).json()["history"]
+    assert history == []
+
+
+def test_preventive_maintenance_forbidden_for_operator(client: TestClient) -> None:
+    token = _make_token("jean_ope", "OPERATEUR")
+    resp = client.post(
+        "/api/maintenance/preventive?cell_id=944&probleme_resolu=true",
+        headers=_auth_header(token),
+    )
+    assert resp.status_code == 403
+
+
 def test_ack_fault_blocked_when_manual_critical_issue_active(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

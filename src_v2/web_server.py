@@ -169,7 +169,7 @@ async def lifespan(_app: FastAPI):
         task.cancel()
 
 
-app = FastAPI(title="Supervision Smart Robotic Cell V2 (NF EN 9100)", lifespan=lifespan)
+app = FastAPI(title="Supervision Smart Robotic Cell (NF EN 9100)", lifespan=lifespan)
 
 # Initialisation de la base SQLite (comptes + historique persistés).
 # Idempotent : peut être appelée à chaque import (y compris sous pytest).
@@ -681,6 +681,67 @@ async def record_maintenance_intervention(
                     )
 
     return {"status": "ok", "cell_id": entry.cellule_id}
+
+
+@app.post("/api/maintenance/preventive")
+async def record_preventive_maintenance(
+    cell_id: int,
+    probleme_resolu: bool = True,
+    notes: str = "",
+    current_user: dict = Depends(require_role("MAINTENANCE")),
+    session: Session = Depends(get_session),
+):
+    """Enregistre une intervention de maintenance PRÉVENTIVE (compteur à 0).
+
+    Utilisé par le bouton "Maintenance effectuée" du dashboard, qui ouvre
+    désormais la même popup "Enregistrer une intervention" que la vue
+    détaillée d'une cellule (choix "Problème résolu" / "Pris en charge,
+    reste actif" + notes optionnelles), au lieu d'agir immédiatement.
+
+    - ``probleme_resolu=True`` : la maintenance est réalisée, le compteur
+      "temps avant maintenance" est remis à zéro côté OPC UA (même effet que
+      l'action ``ack_maint`` du panneau de simulation).
+    - ``probleme_resolu=False`` : l'intervention est seulement tracée
+      ("pris en charge, reste actif") ; le compteur n'est pas remis à zéro,
+      la maintenance reste due et le bouton reste disponible.
+
+    Comme ``ack_maint``, refusé (409) tant que le compteur n'a pas
+    réellement atteint 0, et sans effet sur une éventuelle demande
+    d'intervention générique de l'Opérateur (indépendante du compteur, cf.
+    /api/maintenance/acknowledge-request).
+    """
+    if not await is_maintenance_due(cell_id):
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "La maintenance n'est pas encore requise sur cette "
+                "cellule (le compteur n'a pas atteint 0)."
+            ),
+        )
+
+    if probleme_resolu:
+        try:
+            await apply_simulated_action(cell_id, "ack_maint")
+        except Exception as exc:
+            LOGGER.exception("Maintenance preventive action failed")
+            raise HTTPException(status_code=500, detail=str(exc)) from exc
+        action = f"Intervention terminée sur Cellule {cell_id}"
+    else:
+        action = (
+            f"Maintenance préventive prise en charge sur Cellule {cell_id} "
+            "— toujours active"
+        )
+    if notes.strip():
+        action += f". Notes maintenance : {notes.strip()}"
+
+    db.add_history_entry(
+        session,
+        action=action,
+        username_auteur=current_user["username"],
+        cellule_id=cell_id,
+        probleme_resolu=probleme_resolu,
+    )
+    return {"status": "ok", "cell_id": cell_id}
 
 
 @app.post("/api/maintenance/request")
