@@ -721,6 +721,15 @@
                 showModal(t('interventionSuccess'), 'success');
                 loadFaults();
                 loadMaintenanceHistory();
+                // Résoudre un défaut peut avoir implicitement cloturé une
+                // demande d'intervention générique en attente sur la même
+                // cellule (cf. web_server.py, record_maintenance_intervention).
+                // Rafraîchir tout de suite plutôt qu'attendre le sondage
+                // 2s, pour ne pas laisser le bouton "Prise en charge"
+                // affiché sur une demande déjà traitée (sinon un clic
+                // dessus renvoie une 404 "Aucune demande active" traduite
+                // en erreur générique côté écran).
+                loadAdvancedDiagnostics();
             } catch (e) {
                 console.error(e);
                 showModal(t('interventionError'), 'error');
