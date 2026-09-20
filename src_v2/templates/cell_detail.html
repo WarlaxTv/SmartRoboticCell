@@ -178,6 +178,45 @@
         </div>
     </div>
 
+    <!-- Popup "Prise en charge de la demande generique" (role MAINTENANCE) :
+         meme structure resultat resolu/en cours + notes que la popup
+         d'intervention ci-dessus et que maintenance_history.html (cf.
+         CHG-V2-097). Remplace l'ancienne popup texte simple
+         (openTextPromptModal) qui n'envoyait jamais probleme_resolu,
+         pourtant obligatoire cote serveur depuis CHG-V2-097 -- chaque
+         "Prise en charge" depuis cette page echouait donc systematiquement
+         (422), cf. INC-V2-026. -->
+    <div id="generic-ack-modal-overlay" class="modal-overlay">
+        <div class="modal-box">
+            <div class="modal-header">
+                <span id="generic-ack-modal-title">Prise en charge de la demande</span>
+            </div>
+            <div class="modal-body">
+                <div class="form-field">
+                    <label id="generic-ack-outcome-label">Résultat</label>
+                    <div class="radio-choice">
+                        <label id="generic-ack-radio-resolved-label">
+                            <input type="radio" name="generic-ack-outcome" value="resolved" checked onchange="updateGenericAckRadioStyle()">
+                            <span id="generic-ack-radio-resolved-text">Problème résolu</span>
+                        </label>
+                        <label id="generic-ack-radio-ongoing-label">
+                            <input type="radio" name="generic-ack-outcome" value="ongoing" onchange="updateGenericAckRadioStyle()">
+                            <span id="generic-ack-radio-ongoing-text">Pris en charge, reste actif</span>
+                        </label>
+                    </div>
+                </div>
+                <div class="form-field">
+                    <label for="generic-ack-notes" id="generic-ack-notes-label">Notes (optionnel)</label>
+                    <textarea id="generic-ack-notes" rows="3"></textarea>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn secondary" id="generic-ack-cancel-btn" onclick="closeGenericAckModal()">Annuler</button>
+                <button class="btn" id="generic-ack-submit-btn" onclick="submitGenericAckModal()">Valider</button>
+            </div>
+        </div>
+    </div>
+
     <script src="{{ static_v('common.js') }}"></script>
     <script>
         const cellId = {{ cell_id }};
@@ -216,6 +255,12 @@
                 ackButton: "Prise en charge",
                 ackPromptTitle: "Prise en charge de la demande",
                 ackPromptPlaceholder: "Notes de la Maintenance (optionnel)...",
+                ackOutcomeLabel: "Résultat",
+                ackResolved: "Problème résolu",
+                ackOngoing: "Pris en charge, reste actif",
+                ackNotesLabel: "Notes (optionnel)",
+                ackCancel: "Annuler",
+                ackSubmit: "Valider",
                 ackSuccess: "Demande prise en charge.",
                 ackError: "Erreur lors de la prise en charge.",
                 reportIssueBtn: "Signaler un problème",
@@ -269,6 +314,12 @@
                 ackButton: "Acknowledge",
                 ackPromptTitle: "Acknowledge request",
                 ackPromptPlaceholder: "Maintenance notes (optional)...",
+                ackOutcomeLabel: "Outcome",
+                ackResolved: "Issue resolved",
+                ackOngoing: "Acknowledged, still active",
+                ackNotesLabel: "Notes (optional)",
+                ackCancel: "Cancel",
+                ackSubmit: "Confirm",
                 ackSuccess: "Request acknowledged.",
                 ackError: "Error while acknowledging the request.",
                 reportIssueBtn: "Report an issue",
@@ -358,6 +409,13 @@
             document.getElementById('intervention-notes-label').innerText = t('interventionNotesLabel');
             document.getElementById('intervention-cancel-btn').innerText = t('interventionCancel');
             document.getElementById('intervention-submit-btn').innerText = t('interventionSubmit');
+            document.getElementById('generic-ack-modal-title').innerText = t('ackPromptTitle');
+            document.getElementById('generic-ack-outcome-label').innerText = t('ackOutcomeLabel');
+            document.getElementById('generic-ack-radio-resolved-text').innerText = t('ackResolved');
+            document.getElementById('generic-ack-radio-ongoing-text').innerText = t('ackOngoing');
+            document.getElementById('generic-ack-notes-label').innerText = t('ackNotesLabel');
+            document.getElementById('generic-ack-cancel-btn').innerText = t('ackCancel');
+            document.getElementById('generic-ack-submit-btn').innerText = t('ackSubmit');
             document.getElementById('access-denied-title').innerText = navT('accessDeniedTitle');
             document.getElementById('access-denied-body').innerText = navT('accessDeniedBody');
             document.getElementById('access-denied-back').innerText = navT('accessDeniedBack');
@@ -658,20 +716,45 @@
         }
 
         function openGenericAckPrompt() {
-            openTextPromptModal(t('ackPromptTitle'), t('ackPromptPlaceholder'), (message) => {
-                acknowledgeGenericRequestForCell(message);
+            document.getElementById('generic-ack-notes').value = '';
+            document.querySelector('input[name="generic-ack-outcome"][value="resolved"]').checked = true;
+            updateGenericAckRadioStyle();
+            document.getElementById('generic-ack-modal-overlay').classList.add('open');
+        }
+
+        function closeGenericAckModal() {
+            document.getElementById('generic-ack-modal-overlay').classList.remove('open');
+        }
+
+        function updateGenericAckRadioStyle() {
+            document.querySelectorAll('#generic-ack-modal-overlay .radio-choice label').forEach((label) => {
+                const input = label.querySelector('input[type="radio"]');
+                label.classList.toggle('checked', input.checked);
             });
         }
 
-        async function acknowledgeGenericRequestForCell(message) {
+        async function submitGenericAckModal() {
+            const resolved = document.querySelector('input[name="generic-ack-outcome"]:checked').value === 'resolved';
+            const notes = document.getElementById('generic-ack-notes').value;
+            await acknowledgeGenericRequestForCell(resolved, notes);
+        }
+
+        // ``probleme_resolu`` est obligatoire cote serveur depuis CHG-V2-097
+        // (meme principe que maintenance_history.html::acknowledgeGenericRequest) :
+        // la Maintenance declare si la demande est resolue ou seulement
+        // prise en charge, via la popup radio ci-dessus. L'ancienne version
+        // (simple prompt texte) n'envoyait jamais ce parametre pourtant
+        // requis et echouait systematiquement (422) -- cf. INC-V2-026.
+        async function acknowledgeGenericRequestForCell(probleme_resolu, message) {
             try {
-                const params = new URLSearchParams({ cell_id: cellId });
+                const params = new URLSearchParams({ cell_id: cellId, probleme_resolu: probleme_resolu });
                 if (message) params.set('message', message);
                 const response = await fetch(`/api/maintenance/acknowledge-request?${params.toString()}`, {
                     method: 'POST',
                     headers: { 'Authorization': `Bearer ${token}` },
                 });
                 if (response.ok) {
+                    closeGenericAckModal();
                     showModal(t('ackSuccess'), 'success');
                     loadAdvancedDiagnostics();
                 } else {
